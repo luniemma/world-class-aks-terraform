@@ -1,0 +1,107 @@
+name: Manual Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      operation:
+        description: 'Operation to perform'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+          - validate
+          - refresh-state
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm destruction (only for destroy operation)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  id-token: write
+
+jobs:
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Destroy Confirmation
+        if: inputs.operation == 'destroy'
+        run: |
+          if [ "${{ inputs.confirm_destroy }}" != "DESTROY" ]; then
+            echo "::error::Destroy operation requires typing 'DESTROY' in the confirmation field"
+            exit 1
+          fi
+
+      - name: Production Destroy Warning
+        if: inputs.operation == 'destroy' && inputs.environment == 'prod'
+        run: |
+          echo "### ⚠️ WARNING: PRODUCTION DESTROY REQUESTED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "You are about to destroy the PRODUCTION environment." >> $GITHUB_STEP_SUMMARY
+          echo "This action is IRREVERSIBLE." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Requested by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+
+  terraform-operation:
+    name: Execute Terraform Operation
+    needs: validate-inputs
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      environment: ${{ inputs.environment }}
+      terraform_version: '1.6.0'
+      var_file: 'environments/${{ inputs.environment }}.tfvars'
+      terraform_action: ${{ inputs.operation }}
+      auto_approve: true
+      enable_checkov: ${{ inputs.operation == 'plan' }}
+      enable_tfsec: ${{ inputs.operation == 'plan' }}
+      enable_infracost: ${{ inputs.operation == 'plan' }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+
+  create-audit-log:
+    name: Create Audit Log
+    runs-on: ubuntu-latest
+    needs: terraform-operation
+    if: always()
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create Audit Entry
+        run: |
+          AUDIT_FILE="audit-logs/manual-operations.log"
+          mkdir -p audit-logs
+          
+          echo "$(date -u +"%Y-%m-%d %H:%M:%S UTC") | ${{ github.actor }} | ${{ inputs.environment }} | ${{ inputs.operation }} | ${{ needs.terraform-operation.result }}" >> $AUDIT_FILE
+          
+          cat $AUDIT_FILE || echo "No audit log yet"
+
+      - name: Generate Summary
+        run: |
+          echo "### Manual Operation Summary 📝" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Operation:** ${{ inputs.operation }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ needs.terraform-operation.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Executed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,36 @@
+# Development Environment Configuration
+project_name       = "myproject"
+environment        = "dev"
+location           = "eastus"
+kubernetes_version = "1.28.3"
+
+# Node Configuration
+node_count         = 2
+node_vm_size       = "Standard_D2s_v3"
+node_os_disk_size_gb = 128
+
+# Network Configuration
+vnet_address_space = ["10.0.0.0/16"]
+aks_subnet_prefix  = "10.0.1.0/24"
+network_plugin     = "azure"
+network_policy     = "azure"
+
+# Security Configuration
+enable_private_cluster = true
+
+# Azure AD Admin Groups (Replace with your actual object IDs)
+admin_group_object_ids = [
+  # "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+]
+
+# Monitoring
+log_retention_days = 30
+
+# Tags
+common_tags = {
+  Project     = "AKS-Infrastructure"
+  Environment = "Development"
+  ManagedBy   = "Terraform"
+  CostCenter  = "Engineering"
+  Owner       = "Platform-Team"
+}

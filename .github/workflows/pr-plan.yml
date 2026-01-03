@@ -1,0 +1,113 @@
+name: Pull Request - Terraform Plan
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - '.github/workflows/**.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  id-token: write
+
+jobs:
+  detect-changes:
+    name: Detect Environment Changes
+    runs-on: ubuntu-latest
+    outputs:
+      dev_changed: ${{ steps.changes.outputs.dev }}
+      staging_changed: ${{ steps.changes.outputs.staging }}
+      prod_changed: ${{ steps.changes.outputs.prod }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect Changes
+        id: changes
+        run: |
+          # Check if any environment-specific files changed
+          if git diff --name-only HEAD^ HEAD | grep -qE 'environments/dev\.tfvars|modules/'; then
+            echo "dev=true" >> $GITHUB_OUTPUT
+          else
+            echo "dev=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if git diff --name-only HEAD^ HEAD | grep -qE 'environments/staging\.tfvars|modules/'; then
+            echo "staging=true" >> $GITHUB_OUTPUT
+          else
+            echo "staging=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if git diff --name-only HEAD^ HEAD | grep -qE 'environments/prod\.tfvars|modules/'; then
+            echo "prod=true" >> $GITHUB_OUTPUT
+          else
+            echo "prod=false" >> $GITHUB_OUTPUT
+          fi
+
+  plan-dev:
+    name: Plan Development
+    needs: detect-changes
+    if: needs.detect-changes.outputs.dev_changed == 'true'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      environment: dev
+      terraform_version: '1.6.0'
+      var_file: 'environments/dev.tfvars'
+      terraform_action: plan
+      enable_checkov: true
+      enable_tfsec: true
+      enable_infracost: true
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+
+  plan-staging:
+    name: Plan Staging
+    needs: detect-changes
+    if: needs.detect-changes.outputs.staging_changed == 'true'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      environment: staging
+      terraform_version: '1.6.0'
+      var_file: 'environments/staging.tfvars'
+      terraform_action: plan
+      enable_checkov: true
+      enable_tfsec: true
+      enable_infracost: true
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+
+  plan-prod:
+    name: Plan Production
+    needs: detect-changes
+    if: needs.detect-changes.outputs.prod_changed == 'true'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      environment: prod
+      terraform_version: '1.6.0'
+      var_file: 'environments/prod.tfvars'
+      terraform_action: plan
+      enable_checkov: true
+      enable_tfsec: true
+      enable_infracost: true
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
