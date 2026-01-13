@@ -61,3 +61,4 @@ Thumbs.db
 # Allow example tfvars
 !terraform.tfvars.example
 !environments/*.tfvars
+.env
