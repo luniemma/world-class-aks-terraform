@@ -39,8 +39,6 @@ jobs:
       enable_checkov: true
       enable_tfsec: true
       enable_infracost: true
-      # ⭐ FIX - Add this line to check if INFRACOST_API_KEY exists
-      has_infracost_key: ${{ secrets.INFRACOST_API_KEY != '' }}
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
