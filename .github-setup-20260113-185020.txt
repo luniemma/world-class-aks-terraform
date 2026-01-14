@@ -1,0 +1,12 @@
+GitHub Actions Setup Credentials
+Generated: Tue, Jan 13, 2026  6:50:20 PM
+Repository: luniemma/world-class-aks-terraform
+
+AZURE_CLIENT_ID: 53ed796d-2059-4c32-86ce-0d7b04443e40
+AZURE_TENANT_ID: 1b91c548-cf41-4e44-b8f9-77782b58e4d1
+AZURE_SUBSCRIPTION_ID: 000b9192-a8ef-4cbb-b3a4-8da097b7b301
+# CLIENT_SECRET: (stored securely in GitHub Secrets)
+
+Service Principal Name: terraform-aks-github-world-class-aks-terraform (if created)
+
+IMPORTANT: Store this file securely and delete after setup!

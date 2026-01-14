@@ -14,12 +14,12 @@ terraform {
 
   # Backend configuration for remote state
   # Uncomment and configure for production use
-  # backend "azurerm" {
-  #   resource_group_name  = "terraform-state-rg"
-  #   storage_account_name = "tfstateaksaccount"
-  #   container_name       = "tfstate"
-  #   key                  = "aks/terraform.tfstate"
-  # }
+  backend "azurerm" {
+    resource_group_name  = "terraform-state-rg"
+    storage_account_name = "tfstateaksaccount"
+    container_name       = "tfstate"
+    key                  = "aks/terraform.tfstate"
+  }
 }
 
 provider "azurerm" {

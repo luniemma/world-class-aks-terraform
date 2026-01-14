@@ -2,6 +2,7 @@
 
 # GitHub Actions Secrets Setup Script
 # This script helps you set up required secrets for GitHub Actions
+# FIXED: Works with Git Bash on Windows
 
 set -e
 
@@ -68,7 +69,14 @@ if [[ "$CREATE_SP" =~ ^[Yy]$ ]]; then
     SP_NAME="terraform-aks-github-${REPO_NAME}"
     echo -e "${YELLOW}Creating service principal: $SP_NAME${NC}"
     
-    SP_OUTPUT=$(az ad sp create-for-rbac \
+    # Use MSYS_NO_PATHCONV to prevent Git Bash path conversion on Windows
+    # Use --json-auth instead of deprecated --sdk-auth
+    SP_OUTPUT=$(MSYS_NO_PATHCONV=1 az ad sp create-for-rbac \
+        --name "$SP_NAME" \
+        --role Contributor \
+        --scopes "/subscriptions/$SUBSCRIPTION_ID" \
+        --json-auth 2>/dev/null || \
+        MSYS_NO_PATHCONV=1 az ad sp create-for-rbac \
         --name "$SP_NAME" \
         --role Contributor \
         --scopes "/subscriptions/$SUBSCRIPTION_ID" \
