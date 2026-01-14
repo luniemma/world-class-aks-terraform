@@ -39,6 +39,8 @@ jobs:
       enable_checkov: true
       enable_tfsec: true
       enable_infracost: true
+      # ⭐ FIX - Add this line to check if INFRACOST_API_KEY exists
+      has_infracost_key: ${{ secrets.INFRACOST_API_KEY != '' }}
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -65,14 +67,14 @@ jobs:
               "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
             }
-
+      
       - name: Get AKS Credentials
         run: |
           az aks get-credentials \
             --resource-group ${{ needs.deploy-dev.outputs.resource_group }} \
             --name ${{ needs.deploy-dev.outputs.cluster_name }} \
             --overwrite-existing
-
+      
       - name: Verify Cluster Health
         run: |
           echo "### Post-Deployment Verification 🔍" >> $GITHUB_STEP_SUMMARY
@@ -98,7 +100,7 @@ jobs:
             echo "❌ Only $NODES_READY of $TOTAL_NODES nodes are Ready" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-
+      
       - name: Run Smoke Tests
         run: |
           # Deploy test pod
