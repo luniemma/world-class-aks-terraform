@@ -19,9 +19,11 @@ terraform {
     storage_account_name = "tfstateaksaccount"
     container_name       = "tfstate"
     key                  = "aks/terraform.tfstate"
+    use_azuread_auth = true    # ⭐ ADD THIS LINE
   }
-}
 
+
+}
 provider "azurerm" {
   features {
     resource_group {
