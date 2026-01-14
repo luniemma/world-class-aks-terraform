@@ -46,6 +46,12 @@ on:
         required: false
         type: boolean
         default: true
+      # ⭐ ADDED - Fix for secrets context issue
+      has_infracost_key:
+        description: 'Whether INFRACOST_API_KEY is available'
+        required: false
+        type: boolean
+        default: false
     secrets:
       AZURE_CLIENT_ID:
         required: true
@@ -318,7 +324,7 @@ jobs:
 
       - name: Setup Infracost
         uses: infracost/actions/setup@v2
-        if: secrets.INFRACOST_API_KEY != ''
+        if: inputs.has_infracost_key
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
@@ -329,7 +335,7 @@ jobs:
           path: ${{ inputs.working_directory }}
 
       - name: Generate Infracost JSON
-        if: secrets.INFRACOST_API_KEY != ''
+        if: inputs.has_infracost_key
         run: |
           infracost breakdown \
             --path tfplan-${{ inputs.environment }}-${{ github.run_number }} \
@@ -337,14 +343,14 @@ jobs:
             --out-file /tmp/infracost.json
 
       - name: Post Infracost Comment
-        if: github.event_name == 'pull_request' && secrets.INFRACOST_API_KEY != ''
+        if: github.event_name == 'pull_request' && inputs.has_infracost_key
         uses: infracost/actions/comment@v1
         with:
           path: /tmp/infracost.json
           behavior: update
 
       - name: Generate Cost Summary
-        if: secrets.INFRACOST_API_KEY != ''
+        if: inputs.has_infracost_key
         run: |
           echo "### Cost Estimation 💰" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
