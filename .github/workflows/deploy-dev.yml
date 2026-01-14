@@ -38,7 +38,7 @@ jobs:
       auto_approve: true
       enable_checkov: true
       enable_tfsec: true
-      enable_infracost: true
+      enable_infracost: false
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
