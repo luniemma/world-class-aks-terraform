@@ -72,3 +72,9 @@ variable "common_tags" {
   description = "Common tags for resources"
   type        = map(string)
 }
+
+variable "sku_tier" {
+  description = "AKS SKU tier (Free, Standard, or Premium)"
+  type        = string
+  default     = "Standard"
+}

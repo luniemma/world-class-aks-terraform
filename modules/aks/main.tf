@@ -16,33 +16,37 @@ resource "azurerm_role_assignment" "aks_network" {
 
 # AKS Cluster
 resource "azurerm_kubernetes_cluster" "main" {
-  name                      = "${var.project_name}-${var.environment}-aks"
-  location                  = var.location
-  resource_group_name       = var.resource_group_name
-  dns_prefix                = "${var.project_name}-${var.environment}-aks"
-  kubernetes_version        = var.kubernetes_version
-  sku_tier                  = "Standard"
+  name                = "${var.project_name}-${var.environment}-aks"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  dns_prefix          = "${var.project_name}-${var.environment}-aks"
+  node_resource_group = "${var.resource_group_name}-nodes"
+
+  # Kubernetes version - use 1.32+ for standard support
+  # Version 1.30 and earlier require Premium tier + LTS support plan
+  # Check available versions: az aks get-versions --location <region> --output table
+  kubernetes_version = coalesce(var.kubernetes_version, "1.33")
+
+  sku_tier                  = var.sku_tier
   private_cluster_enabled   = var.enable_private_cluster
-  automatic_channel_upgrade = "patch"
-  node_resource_group       = "${var.resource_group_name}-nodes"
+  automatic_upgrade_channel = "patch"
 
   # Default node pool configuration
   default_node_pool {
-    name                = "system"
-    node_count          = var.node_count
-    vm_size             = var.node_vm_size
-    os_disk_size_gb     = var.node_os_disk_size_gb
-    vnet_subnet_id      = var.vnet_subnet_id
-    type                = "VirtualMachineScaleSets"
-    enable_auto_scaling = true
-    min_count           = var.node_count
-    max_count           = var.node_count + 2
-    max_pods            = 110
-    os_disk_type        = "Managed"
-    
-    # Security settings
+    name                         = "system"
+    node_count                   = var.node_count
+    vm_size                      = var.node_vm_size
+    os_disk_size_gb              = var.node_os_disk_size_gb
+    os_disk_type                 = "Managed"
+    vnet_subnet_id               = var.vnet_subnet_id
+    type                         = "VirtualMachineScaleSets"
+    temporary_name_for_rotation  = "systemtmp"
+    auto_scaling_enabled         = true
+    min_count                    = var.node_count
+    max_count                    = var.node_count + 2
+    max_pods                     = 110
     only_critical_addons_enabled = false
-    
+
     upgrade_settings {
       max_surge = "33%"
     }
@@ -67,17 +71,17 @@ resource "azurerm_kubernetes_cluster" "main" {
     network_policy    = var.network_policy
     load_balancer_sku = "standard"
     outbound_type     = "loadBalancer"
-    
+
     # Service and pod CIDR (non-overlapping with VNet)
     service_cidr   = "172.16.0.0/16"
     dns_service_ip = "172.16.0.10"
   }
 
-  # Azure AD integration with RBAC
+  # Microsoft Entra ID (Azure AD) integration with RBAC
+  # Note: 'managed' is deprecated but required until AzureRM provider v4.0
   azure_active_directory_role_based_access_control {
-    managed                = true
-    admin_group_object_ids = var.admin_group_object_ids
     azure_rbac_enabled     = true
+    admin_group_object_ids = var.admin_group_object_ids
   }
 
   # Monitoring with Azure Monitor
@@ -93,7 +97,7 @@ resource "azurerm_kubernetes_cluster" "main" {
   # Key Vault Secrets Provider
   key_vault_secrets_provider {
     secret_rotation_enabled  = true
-    secret_rotation_interval = "2m"
+    secret_rotation_interval = "5m"
   }
 
   # Azure Policy Add-on
@@ -182,3 +186,4 @@ resource "azurerm_monitor_diagnostic_setting" "aks" {
     enabled  = true
   }
 }
+
