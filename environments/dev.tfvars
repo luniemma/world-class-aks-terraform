@@ -8,7 +8,7 @@ location     = "eastus"
 # ===================
 # Kubernetes Configuration
 # ===================
-kubernetes_version = "1.30.6"    # ⭐ FIXED: added .0 for X.Y.Z format
+kubernetes_version = "1.33.0"    # ⭐ FIXED: added .0 for X.Y.Z format
 
 # ===================
 # Networking

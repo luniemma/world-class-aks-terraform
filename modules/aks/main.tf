@@ -29,7 +29,7 @@ resource "azurerm_kubernetes_cluster" "main" {
 
   sku_tier                  = var.sku_tier
   private_cluster_enabled   = var.enable_private_cluster
-  automatic_upgrade_channel = "patch"
+  automatic_channel_upgrade = "patch"
 
   # Default node pool configuration
   default_node_pool {
@@ -41,7 +41,7 @@ resource "azurerm_kubernetes_cluster" "main" {
     vnet_subnet_id               = var.vnet_subnet_id
     type                         = "VirtualMachineScaleSets"
     temporary_name_for_rotation  = "systemtmp"
-    auto_scaling_enabled         = true
+    enable_auto_scaling          = true
     min_count                    = var.node_count
     max_count                    = var.node_count + 2
     max_pods                     = 110
@@ -186,4 +186,3 @@ resource "azurerm_monitor_diagnostic_setting" "aks" {
     enabled  = true
   }
 }
-
