@@ -222,7 +222,7 @@ jobs:
               -no-color | tee plan.txt
           fi
           
-          EXITCODE=$?
+          EXITCODE=${PIPESTATUS[0]}
           echo "exitcode=$EXITCODE" >> $GITHUB_OUTPUT
           echo "plan_id=$PLAN_FILE" >> $GITHUB_OUTPUT
           

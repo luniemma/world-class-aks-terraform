@@ -66,17 +66,24 @@ jobs:
             -var-file=environments/dev.tfvars \
             -detailed-exitcode \
             -no-color | tee drift-dev.txt
+          EXITCODE=${PIPESTATUS[0]}
+          echo "exitcode=$EXITCODE" >> $GITHUB_OUTPUT
+          exit 0
         continue-on-error: true
 
       - name: Check for Drift
         id: drift
         run: |
-          EXITCODE=${{ steps.plan.outcome }}
+          EXITCODE=${{ steps.plan.outputs.exitcode }}
           
-          if [ "$EXITCODE" == "failure" ]; then
+          if [ "$EXITCODE" == "2" ]; then
             # Exit code 2 means changes detected (drift)
             echo "drift_detected=true" >> $GITHUB_OUTPUT
             echo "### ⚠️ Drift Detected in Dev Environment" >> $GITHUB_STEP_SUMMARY
+          elif [ "$EXITCODE" == "1" ]; then
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+            echo "### ❌ Terraform Plan Failed in Dev Environment" >> $GITHUB_STEP_SUMMARY
+            exit 1
           else
             echo "drift_detected=false" >> $GITHUB_OUTPUT
             echo "### ✅ No Drift Detected in Dev Environment" >> $GITHUB_STEP_SUMMARY
