@@ -80,6 +80,7 @@ resource "azurerm_kubernetes_cluster" "main" {
   # Microsoft Entra ID (Azure AD) integration with RBAC
   # Note: 'managed' is deprecated but required until AzureRM provider v4.0
   azure_active_directory_role_based_access_control {
+    managed                = true
     azure_rbac_enabled     = true
     admin_group_object_ids = var.admin_group_object_ids
   }
