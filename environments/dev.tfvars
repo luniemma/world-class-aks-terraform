@@ -1,4 +1,4 @@
-cat > environments/dev.tfvars << 'EOF'
+
 # ===================
 # Project Configuration
 # ===================
@@ -80,4 +80,3 @@ auto_scaler_profile = {
 # auto_stop_enabled = true
 # auto_stop_schedule = "0 20 * * 1-5"  # Stop at 8 PM on weekdays
 # auto_start_schedule = "0 8 * * 1-5"  # Start at 8 AM on weekdays
-EOF
