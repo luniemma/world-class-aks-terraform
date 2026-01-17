@@ -130,7 +130,7 @@ jobs:
 
       - name: Upload tfsec Results to Security Tab
         if: inputs.enable_tfsec && always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ inputs.working_directory }}/tfsec-results.sarif
           category: tfsec
