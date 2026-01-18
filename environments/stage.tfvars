@@ -1,8 +1,8 @@
 # ===================
 # Project Configuration
 # ===================
-project_name = "aksprod"          # ⭐ FIXED: max 10 chars, no hyphens 
-environment  = "prod"
+project_name = "aksstage"          # ⭐ FIXED: max 10 chars, no hyphens 
+environment  = "stage"
 location     = "eastus"
 
 # ===================
@@ -44,7 +44,7 @@ network_policy         = "azure"
 # Common Tags
 # ===================
 common_tags = {
-  Environment = "dev"
+  Environment = "stage"
   ManagedBy   = "Terraform"
   Project     = "AKS-Terraform"
   CostCenter  = "Engineering"
