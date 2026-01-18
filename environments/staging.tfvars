@@ -2,7 +2,7 @@
 # Project Configuration
 # ===================
 project_name = "aksstage"          # ⭐ FIXED: max 10 chars, no hyphens 
-environment  = "stage"
+environment  = "staging"
 location     = "eastus"
 
 # ===================
@@ -44,9 +44,16 @@ network_policy         = "azure"
 # Common Tags
 # ===================
 common_tags = {
-  Environment = "stage"
+  Environment = "staging"
   ManagedBy   = "Terraform"
   Project     = "AKS-Terraform"
   CostCenter  = "Engineering"
   Owner       = "Platform-Team"
 }
+# Security settings (moderate for staging)
+# Security settings (strict for prod)
+# Security settings (strict for production)
+os_disk_type                 = "Ephemeral"
+enable_host_encryption       = true
+only_critical_addons_enabled = true
+disk_encryption_set_id       = "null"  # Or null if not using
