@@ -55,4 +55,4 @@ common_tags = {
 os_disk_type                 = "Managed"
 enable_host_encryption       = false
 only_critical_addons_enabled = false
-disk_encryption_set_id       = null
+disk_encryption_set_id       = null # Or null if not using
