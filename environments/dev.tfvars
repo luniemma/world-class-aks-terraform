@@ -1,7 +1,7 @@
 # ===================
 # Project Configuration
 # ===================
-project_name = "aksdev"          # ⭐ FIXED: max 10 chars, no hyphens
+project_name = "aksdev"          # ⭐ FIXED: max 10 chars, no hyphens 
 environment  = "dev"
 location     = "eastus"
 
