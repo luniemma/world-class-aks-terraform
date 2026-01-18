@@ -96,4 +96,8 @@ module "aks" {
   common_tags                = var.common_tags
 
   depends_on = [module.networking]
+  os_disk_type                 = var.os_disk_type
+  only_critical_addons_enabled = var.only_critical_addons_enabled
+  enable_host_encryption       = var.enable_host_encryption
+  disk_encryption_set_id       = var.disk_encryption_set_id
 }

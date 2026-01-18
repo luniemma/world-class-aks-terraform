@@ -50,9 +50,9 @@ common_tags = {
   CostCenter  = "Engineering"
   Owner       = "Platform-Team"
 }
-# Security settings (strict for prod)
-# Security settings (strict for production)
-os_disk_type                 = "Ephemeral"
-enable_host_encryption       = true
-only_critical_addons_enabled = true
-disk_encryption_set_id       = "null"  # Or null if not using
+# # Security settings (strict for prod)
+# # Security settings (strict for production)
+# os_disk_type                 = "Ephemeral"
+# enable_host_encryption       = true
+# only_critical_addons_enabled = true
+# disk_encryption_set_id       = "null"  # Or null if not using
