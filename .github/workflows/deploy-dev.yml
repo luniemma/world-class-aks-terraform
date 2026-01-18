@@ -39,6 +39,7 @@ jobs:
       enable_checkov: true
       enable_tfsec: true
       enable_infracost: false
+      enable_post_deploy_tests: false  # Disable built-in tests, using custom job below
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -50,7 +51,11 @@ jobs:
     name: Post-Deployment Tests
     runs-on: ubuntu-latest
     needs: deploy-dev
-    if: needs.deploy-dev.outputs.cluster_name != ''
+    if: |
+      always() &&
+      needs.deploy-dev.outputs.cluster_name != '' &&
+      needs.deploy-dev.result == 'success'
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -65,14 +70,42 @@ jobs:
               "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
             }
-      
+
+      # =========================================================
+      # CRITICAL: Install kubelogin BEFORE getting AKS credentials
+      # Required for AAD-enabled AKS clusters
+      # =========================================================
+      - name: Install kubectl and kubelogin
+        run: |
+          echo "Installing kubectl..."
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          
+          echo "Installing kubelogin..."
+          KUBELOGIN_VERSION="v0.1.4"
+          curl -LO "https://github.com/Azure/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin-linux-amd64.zip"
+          unzip -o kubelogin-linux-amd64.zip -d kubelogin-extract
+          sudo mv kubelogin-extract/bin/linux_amd64/kubelogin /usr/local/bin/
+          rm -rf kubelogin-extract kubelogin-linux-amd64.zip
+          
+          echo "Verifying installations..."
+          kubectl version --client
+          kubelogin --version
+
       - name: Get AKS Credentials
         run: |
           az aks get-credentials \
             --resource-group ${{ needs.deploy-dev.outputs.resource_group }} \
             --name ${{ needs.deploy-dev.outputs.cluster_name }} \
             --overwrite-existing
-      
+          
+          # CRITICAL: Convert kubeconfig to use Azure CLI authentication
+          # This allows service principal auth to work in CI/CD pipelines
+          kubelogin convert-kubeconfig -l azurecli
+          
+          echo "✅ Kubeconfig configured for Azure CLI authentication"
+
       - name: Verify Cluster Health
         run: |
           echo "### Post-Deployment Verification 🔍" >> $GITHUB_STEP_SUMMARY
@@ -80,28 +113,75 @@ jobs:
           
           # Check nodes
           echo "**Nodes:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           kubectl get nodes -o wide >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Check system pods
           echo "**System Pods:**" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n kube-system >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n kube-system | head -25 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Verify all nodes are ready
-          NODES_READY=$(kubectl get nodes --no-headers | grep -c " Ready")
+          NODES_READY=$(kubectl get nodes --no-headers | grep -c " Ready" || echo "0")
           TOTAL_NODES=$(kubectl get nodes --no-headers | wc -l)
           
-          if [ "$NODES_READY" -eq "$TOTAL_NODES" ]; then
+          if [ "$NODES_READY" -eq "$TOTAL_NODES" ] && [ "$TOTAL_NODES" -gt 0 ]; then
             echo "✅ All $TOTAL_NODES nodes are Ready" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Only $NODES_READY of $TOTAL_NODES nodes are Ready" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-      
+
       - name: Run Smoke Tests
         run: |
-          # Deploy test pod
-          kubectl run test-pod --image=nginx --restart=Never --rm -i --quiet -- echo "Smoke test passed"
+          echo "Running smoke tests..."
+          
+          # Deploy test pod and verify it runs
+          kubectl run smoke-test --image=nginx:alpine --restart=Never --timeout=60s
+          kubectl wait --for=condition=Ready pod/smoke-test --timeout=60s
+          
+          echo "✅ Pod created successfully"
+          
+          # Clean up
+          kubectl delete pod smoke-test --ignore-not-found
           
           echo "✅ Smoke tests passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check Critical Components
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Critical Components Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check CoreDNS
+          COREDNS_READY=$(kubectl get pods -n kube-system -l k8s-app=kube-dns --no-headers | grep -c "Running" || echo "0")
+          if [ "$COREDNS_READY" -gt 0 ]; then
+            echo "✅ CoreDNS: $COREDNS_READY pod(s) running" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ CoreDNS: Not running" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check kube-proxy
+          PROXY_READY=$(kubectl get pods -n kube-system -l component=kube-proxy --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+          if [ "$PROXY_READY" -gt 0 ]; then
+            echo "✅ kube-proxy: $PROXY_READY pod(s) running" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ kube-proxy: Using different networking (Azure CNI)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check Azure CNI / network plugin
+          CNI_PODS=$(kubectl get pods -n kube-system -l k8s-app=azure-cni-networkmonitor --no-headers 2>/dev/null | wc -l || echo "0")
+          echo "ℹ️ Azure CNI network monitor pods: $CNI_PODS" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate Summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster:** ${{ needs.deploy-dev.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Resource Group:** ${{ needs.deploy-dev.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tested at:** $(date -u)" >> $GITHUB_STEP_SUMMARY
