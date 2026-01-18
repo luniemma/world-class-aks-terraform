@@ -79,3 +79,31 @@ variable "sku_tier" {
   type        = string
   default     = "Standard"
 }
+
+# =============================================================================
+# SECURITY VARIABLES (for Checkov compliance)
+# =============================================================================
+
+variable "os_disk_type" {
+  description = "OS disk type: Managed or Ephemeral. Ephemeral recommended for prod (CKV_AZURE_226)"
+  type        = string
+  default     = "Managed"
+}
+
+variable "only_critical_addons_enabled" {
+  description = "Only run critical system pods on system nodes (CKV_AZURE_232). Requires user node pool."
+  type        = bool
+  default     = false
+}
+
+variable "enable_host_encryption" {
+  description = "Enable encryption at host for temp disks/caches (CKV_AZURE_227). Requires subscription feature."
+  type        = bool
+  default     = false
+}
+
+variable "disk_encryption_set_id" {
+  description = "Disk encryption set ID for OS/data disk encryption (CKV_AZURE_117). Set null to skip."
+  type        = string
+  default     = null
+}

@@ -1,4 +1,4 @@
-name: Manual Operations
+name: Manual Terraform Operations
 
 on:
   workflow_dispatch:
@@ -11,66 +11,166 @@ on:
           - dev
           - staging
           - prod
-      operation:
-        description: 'Operation to perform'
+        default: 'dev'
+      terraform_action:
+        description: 'Terraform action to perform'
         required: true
         type: choice
         options:
           - plan
           - apply
           - destroy
-          - validate
-          - refresh-state
+        default: 'plan'
       confirm_destroy:
-        description: 'Type "DESTROY" to confirm destruction (only for destroy operation)'
+        description: 'Type "DESTROY" to confirm destruction (required for destroy action)'
         required: false
         type: string
         default: ''
+      confirm_prod:
+        description: 'Type "PRODUCTION" to confirm production changes (required for prod apply/destroy)'
+        required: false
+        type: string
+        default: ''
+      skip_security_scan:
+        description: 'Skip security scanning (not recommended)'
+        required: false
+        type: boolean
+        default: false
+      skip_post_deploy_tests:
+        description: 'Skip post-deployment tests'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   pull-requests: write
   security-events: write
   id-token: write
+  issues: write
 
 jobs:
-  validate-inputs:
-    name: Validate Inputs
+  # ===========================================================================
+  # SAFETY CHECKS
+  # ===========================================================================
+  safety-checks:
+    name: Safety Checks
     runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
     steps:
-      - name: Validate Destroy Confirmation
-        if: inputs.operation == 'destroy'
+      - name: Validate Inputs
+        id: check
         run: |
-          if [ "${{ inputs.confirm_destroy }}" != "DESTROY" ]; then
-            echo "::error::Destroy operation requires typing 'DESTROY' in the confirmation field"
-            exit 1
+          echo "### 🔐 Safety Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          PROCEED="true"
+          
+          # Check destroy confirmation
+          if [ "${{ inputs.terraform_action }}" == "destroy" ]; then
+            if [ "${{ inputs.confirm_destroy }}" != "DESTROY" ]; then
+              echo "| Destroy Confirmation | ❌ Failed - must type 'DESTROY' |" >> $GITHUB_STEP_SUMMARY
+              echo "::error::Destroy action requires typing 'DESTROY' in the confirm_destroy field"
+              PROCEED="false"
+            else
+              echo "| Destroy Confirmation | ✅ Confirmed |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Destroy Confirmation | ⏭️ Not required |" >> $GITHUB_STEP_SUMMARY
           fi
+          
+          # Check production confirmation
+          if [ "${{ inputs.environment }}" == "prod" ]; then
+            if [ "${{ inputs.terraform_action }}" == "apply" ] || [ "${{ inputs.terraform_action }}" == "destroy" ]; then
+              if [ "${{ inputs.confirm_prod }}" != "PRODUCTION" ]; then
+                echo "| Production Confirmation | ❌ Failed - must type 'PRODUCTION' |" >> $GITHUB_STEP_SUMMARY
+                echo "::error::Production changes require typing 'PRODUCTION' in the confirm_prod field"
+                PROCEED="false"
+              else
+                echo "| Production Confirmation | ✅ Confirmed |" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "| Production Confirmation | ⏭️ Not required for plan |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Production Confirmation | ⏭️ Not required |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check business hours for production (optional warning)
+          HOUR=$(date -u +%H)
+          if [ "${{ inputs.environment }}" == "prod" ] && [ "${{ inputs.terraform_action }}" != "plan" ]; then
+            if [ "$HOUR" -ge 14 ] && [ "$HOUR" -le 22 ]; then
+              echo "| Business Hours Check | ⚠️ Warning - deploying during peak hours (UTC) |" >> $GITHUB_STEP_SUMMARY
+              echo "::warning::Deploying to production during potential peak hours (14:00-22:00 UTC)"
+            else
+              echo "| Business Hours Check | ✅ Off-peak hours |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Business Hours Check | ⏭️ Not checked |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$PROCEED" == "true" ]; then
+            echo "### ✅ All safety checks passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Safety checks failed - workflow will not proceed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "proceed=$PROCEED" >> $GITHUB_OUTPUT
 
-      - name: Production Destroy Warning
-        if: inputs.operation == 'destroy' && inputs.environment == 'prod'
+      - name: Fail if Checks Failed
+        if: steps.check.outputs.proceed != 'true'
         run: |
-          echo "### ⚠️ WARNING: PRODUCTION DESTROY REQUESTED" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "You are about to destroy the PRODUCTION environment." >> $GITHUB_STEP_SUMMARY
-          echo "This action is IRREVERSIBLE." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Requested by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "Safety checks failed. Please review the requirements and try again."
+          exit 1
 
-  terraform-operation:
-    name: Execute Terraform Operation
-    needs: validate-inputs
+  # ===========================================================================
+  # AUDIT LOG
+  # ===========================================================================
+  audit-log:
+    name: Audit Log
+    runs-on: ubuntu-latest
+    needs: safety-checks
+    if: needs.safety-checks.outputs.proceed == 'true'
+    steps:
+      - name: Log Operation
+        run: |
+          echo "### 📝 Operation Audit Log" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Operator | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Action | ${{ inputs.terraform_action }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run ID | ${{ github.run_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run Number | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ref | ${{ github.ref }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================================================
+  # TERRAFORM OPERATIONS
+  # ===========================================================================
+  terraform:
+    name: Terraform ${{ inputs.terraform_action }} - ${{ inputs.environment }}
+    needs: [safety-checks, audit-log]
+    if: needs.safety-checks.outputs.proceed == 'true'
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: ${{ inputs.environment }}
       terraform_version: '1.6.0'
       var_file: 'environments/${{ inputs.environment }}.tfvars'
-      terraform_action: ${{ inputs.operation }}
+      terraform_action: ${{ inputs.terraform_action }}
       auto_approve: true
-      enable_checkov: ${{ inputs.operation == 'plan' }}
-      enable_tfsec: ${{ inputs.operation == 'plan' }}
-      enable_infracost: ${{ inputs.operation == 'plan' }}
+      enable_checkov: ${{ !inputs.skip_security_scan }}
+      enable_tfsec: ${{ !inputs.skip_security_scan }}
+      enable_infracost: true
+      enable_post_deploy_tests: ${{ !inputs.skip_post_deploy_tests && inputs.terraform_action == 'apply' }}
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -78,30 +178,64 @@ jobs:
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
 
-  create-audit-log:
-    name: Create Audit Log
+  # ===========================================================================
+  # NOTIFICATION
+  # ===========================================================================
+  notify-completion:
+    name: Notify Completion
     runs-on: ubuntu-latest
-    needs: terraform-operation
-    if: always()
+    needs: [safety-checks, terraform]
+    if: always() && needs.safety-checks.outputs.proceed == 'true'
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Create Audit Entry
+      - name: Generate Completion Summary
         run: |
-          AUDIT_FILE="audit-logs/manual-operations.log"
-          mkdir -p audit-logs
-          
-          echo "$(date -u +"%Y-%m-%d %H:%M:%S UTC") | ${{ github.actor }} | ${{ inputs.environment }} | ${{ inputs.operation }} | ${{ needs.terraform-operation.result }}" >> $AUDIT_FILE
-          
-          cat $AUDIT_FILE || echo "No audit log yet"
-
-      - name: Generate Summary
-        run: |
-          echo "### Manual Operation Summary 📝" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏁 Operation Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Operation:** ${{ inputs.operation }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ${{ needs.terraform-operation.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Executed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Action | ${{ inputs.terraform_action }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Result | ${{ needs.terraform.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Completed At | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Operator | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.terraform_action }}" == "apply" ] && [ "${{ needs.terraform.result }}" == "success" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### Deployed Resources" >> $GITHUB_STEP_SUMMARY
+            echo "- **Cluster:** ${{ needs.terraform.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Resource Group:** ${{ needs.terraform.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create Issue for Failed Production Operation
+        if: |
+          failure() &&
+          inputs.environment == 'prod' &&
+          inputs.terraform_action != 'plan'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Failed Production ${process.env.ACTION} - ${new Date().toISOString().split('T')[0]}`,
+              body: `## Production Operation Failed
+              
+              **Operator:** @${{ github.actor }}
+              **Action:** ${{ inputs.terraform_action }}
+              **Environment:** ${{ inputs.environment }}
+              **Timestamp:** ${new Date().toISOString()}
+              **Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              
+              ### Required Actions
+              1. Review the workflow logs for error details
+              2. Assess the impact on production systems
+              3. Determine if manual intervention is required
+              4. Document findings in this issue
+              
+              ### Workflow Link
+              ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+              `,
+              labels: ['incident', 'production', 'terraform']
+            });
+        env:
+          ACTION: ${{ inputs.terraform_action }}
