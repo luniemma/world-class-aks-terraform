@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.6.0"
-  
+
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
@@ -19,7 +19,7 @@ terraform {
     storage_account_name = "tfstateaksaccount"
     container_name       = "tfstate"
     key                  = "aks/terraform.tfstate"
-    use_azuread_auth = true    # ⭐ ADD THIS LINE
+    use_azuread_auth     = true # ⭐ ADD THIS LINE
   }
 
 
