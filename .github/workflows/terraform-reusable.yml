@@ -100,15 +100,22 @@ jobs:
           terraform_version: ${{ inputs.terraform_version }}
 
       - name: Terraform Format Check
-        id: fmt
+        id: fmt-check
         run: |
-          if ! terraform fmt -check -recursive -diff; then
-            echo "formatted=false" >> $GITHUB_OUTPUT
-            echo "::warning::Terraform files are not properly formatted. Run 'terraform fmt -recursive' to fix."
-          else
+          if terraform fmt -check -recursive; then
             echo "formatted=true" >> $GITHUB_OUTPUT
+          else
+            echo "formatted=false" >> $GITHUB_OUTPUT
           fi
         continue-on-error: true
+
+      - name: Terraform Format (Auto-fix)
+        id: fmt
+        if: steps.fmt-check.outputs.formatted == 'false'
+        run: |
+          echo "Auto-formatting Terraform files..."
+          terraform fmt -recursive
+          echo "✅ Formatting complete"
 
       - name: Terraform Init
         id: init
@@ -126,10 +133,10 @@ jobs:
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           
-          if [ "${{ steps.fmt.outputs.formatted }}" == "true" ]; then
-            echo "| Format | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.fmt-check.outputs.formatted }}" == "true" ]; then
+            echo "| Format | ✅ Already formatted |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| Format | ⚠️ Needs formatting |" >> $GITHUB_STEP_SUMMARY
+            echo "| Format | 🔧 Auto-formatted |" >> $GITHUB_STEP_SUMMARY
           fi
           
           if [ "${{ steps.init.outcome }}" == "success" ]; then
@@ -144,9 +151,9 @@ jobs:
             echo "| Validate | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
           
-          if [ "${{ steps.fmt.outputs.formatted }}" != "true" ]; then
+          if [ "${{ steps.fmt-check.outputs.formatted }}" != "true" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "💡 **Tip:** Run \`terraform fmt -recursive\` locally to fix formatting" >> $GITHUB_STEP_SUMMARY
+            echo "💡 **Tip:** Run \`terraform fmt -recursive\` locally before committing" >> $GITHUB_STEP_SUMMARY
           fi
 
   # ===========================================================================
