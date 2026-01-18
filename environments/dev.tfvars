@@ -50,3 +50,9 @@ common_tags = {
   CostCenter  = "Engineering"
   Owner       = "Platform-Team"
 }
+
+# Security settings (relaxed for dev)
+os_disk_type                 = "Managed"
+enable_host_encryption       = false
+only_critical_addons_enabled = false
+disk_encryption_set_id       = null
