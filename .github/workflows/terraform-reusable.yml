@@ -211,27 +211,40 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
+          set -o pipefail
           PLAN_FILE="tfplan-${{ inputs.environment }}-${{ github.run_number }}"
           
+          # Run terraform plan and capture exit code properly
           if [ -n "${{ inputs.var_file }}" ]; then
             echo "Using variable file: ${{ inputs.var_file }}"
             terraform plan \
               -var-file="${{ inputs.var_file }}" \
               -out="${PLAN_FILE}" \
               -detailed-exitcode \
-              -no-color | tee plan.txt
+              -no-color 2>&1 | tee plan.txt
+            EXITCODE=${PIPESTATUS[0]}
           else
             terraform plan \
               -out="${PLAN_FILE}" \
               -detailed-exitcode \
-              -no-color | tee plan.txt
+              -no-color 2>&1 | tee plan.txt
+            EXITCODE=${PIPESTATUS[0]}
           fi
           
-          EXITCODE=${PIPESTATUS[0]}
+          echo "Terraform plan exit code: $EXITCODE"
+          echo "  0 = No changes"
+          echo "  1 = Error"
+          echo "  2 = Changes detected"
+          
           echo "exitcode=$EXITCODE" >> $GITHUB_OUTPUT
           echo "plan_id=$PLAN_FILE" >> $GITHUB_OUTPUT
+          
+          # Exit 0 so the job continues, but preserve the actual exitcode in outputs
+          if [ "$EXITCODE" -eq 1 ]; then
+            echo "::error::Terraform plan failed"
+            exit 1
+          fi
           exit 0
-        continue-on-error: true
 
       - name: Generate Plan Summary
         if: always()
@@ -241,6 +254,17 @@ jobs:
           echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**Terraform Version:** ${{ inputs.terraform_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Plan Exit Code:** ${{ steps.plan.outputs.exitcode }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Requested Action:** ${{ inputs.terraform_action }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Explain what will happen next
+          if [ "${{ steps.plan.outputs.exitcode }}" == "0" ]; then
+            echo "ℹ️ **No changes detected** - Apply will be skipped" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.plan.outputs.exitcode }}" == "2" ]; then
+            echo "✅ **Changes detected** - Apply will run if action is 'apply'" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.plan.outputs.exitcode }}" == "1" ]; then
+            echo "❌ **Plan failed** - Check errors above" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -f plan.txt ]; then
@@ -361,6 +385,36 @@ jobs:
           infracost breakdown \
             --path tfplan-${{ inputs.environment }}-${{ github.run_number }} \
             --format table >> $GITHUB_STEP_SUMMARY
+
+  check-apply-conditions:
+    name: Check Apply Conditions
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: always()
+    steps:
+      - name: Debug Apply Conditions
+        run: |
+          echo "### Apply Job Conditions Check 🔍" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Condition | Value | Required |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| terraform_action | \`${{ inputs.terraform_action }}\` | \`apply\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| plan exitcode | \`${{ needs.terraform-plan.outputs.exitcode }}\` | \`2\` (changes detected) |" >> $GITHUB_STEP_SUMMARY
+          echo "| plan result | \`${{ needs.terraform-plan.result }}\` | \`success\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Determine if apply will run
+          if [ "${{ inputs.terraform_action }}" != "apply" ]; then
+            echo "⏭️ **Apply will NOT run:** terraform_action is '${{ inputs.terraform_action }}', not 'apply'" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.terraform-plan.outputs.exitcode }}" == "0" ]; then
+            echo "⏭️ **Apply will NOT run:** No changes detected (exitcode=0)" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.terraform-plan.outputs.exitcode }}" == "1" ]; then
+            echo "❌ **Apply will NOT run:** Plan failed (exitcode=1)" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.terraform-plan.outputs.exitcode }}" == "2" ]; then
+            echo "✅ **Apply WILL run:** Changes detected and action is 'apply'" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Unknown state:** exitcode='${{ needs.terraform-plan.outputs.exitcode }}'" >> $GITHUB_STEP_SUMMARY
+          fi
 
   terraform-apply:
     name: Terraform Apply
