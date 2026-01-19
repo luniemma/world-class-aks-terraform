@@ -16,7 +16,7 @@ resource "azurerm_subnet" "aks" {
   address_prefixes     = [var.aks_subnet_prefix]
 
   # Disable private endpoint network policies for AKS
-  private_endpoint_network_policies_enabled     = false
+  private_endpoint_network_policies = "Disabled"
   private_link_service_network_policies_enabled = false
 }
 
