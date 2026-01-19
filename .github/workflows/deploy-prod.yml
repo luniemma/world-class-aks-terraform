@@ -1,7 +1,3 @@
-# =============================================================================
-# DEPLOY TO PRODUCTION WITH APP DEPLOYMENT
-# Place this in: AKS-Terraform-repo/.github/workflows/deploy-prod.yml
-# =============================================================================
 name: Deploy to Production
 
 on:
@@ -48,9 +44,6 @@ permissions:
   id-token: write
 
 jobs:
-  # ===========================================================================
-  # SAFETY CHECKS
-  # ===========================================================================
   safety-checks:
     name: Safety Checks
     runs-on: ubuntu-latest
@@ -63,17 +56,14 @@ jobs:
         run: |
           PROCEED="true"
           
-          # Determine action
           if [ "${{ github.event_name }}" == "push" ]; then
             ACTION="plan"
-            echo "Push event - will only run plan"
           else
             ACTION="${{ inputs.terraform_action }}"
           fi
           
           echo "action=$ACTION" >> $GITHUB_OUTPUT
           
-          # Require confirmation for apply/destroy
           if [ "$ACTION" == "apply" ] || [ "$ACTION" == "destroy" ]; then
             if [ "${{ inputs.confirm_production }}" != "PRODUCTION" ]; then
               echo "::error::Production $ACTION requires typing 'PRODUCTION'"
@@ -83,28 +73,16 @@ jobs:
           
           echo "proceed=$PROCEED" >> $GITHUB_OUTPUT
           
-          # Summary
           echo "### 🔐 Production Safety Check" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Action | $ACTION |" >> $GITHUB_STEP_SUMMARY
-          if [ "$ACTION" == "apply" ] || [ "$ACTION" == "destroy" ]; then
-            if [ "${{ inputs.confirm_production }}" == "PRODUCTION" ]; then
-              echo "| Confirmation | ✅ Confirmed |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| Confirmation | ❌ Required |" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
           echo "| Proceed | $PROCEED |" >> $GITHUB_STEP_SUMMARY
 
       - name: Fail if Not Confirmed
         if: steps.check.outputs.proceed != 'true'
         run: exit 1
 
-  # ===========================================================================
-  # PLAN INFRASTRUCTURE
-  # ===========================================================================
   plan:
     name: Plan Infrastructure
     needs: safety-checks
@@ -117,7 +95,7 @@ jobs:
       terraform_action: plan
       enable_checkov: true
       enable_tfsec: true
-      enable_infracost: true
+      enable_infracost: false
       enable_post_deploy_tests: false
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -125,10 +103,8 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      ARM_ACCESS_KEY: ${{ secrets.ARM_ACCESS_KEY }}
 
-  # ===========================================================================
-  # APPROVAL GATE
-  # ===========================================================================
   approve:
     name: Approve Deployment
     runs-on: ubuntu-latest
@@ -140,13 +116,8 @@ jobs:
       name: prod-approval
     steps:
       - name: Approved
-        run: |
-          echo "### ✅ Production Deployment Approved" >> $GITHUB_STEP_SUMMARY
-          echo "Approved by: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        run: echo "✅ Production deployment approved by @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
 
-  # ===========================================================================
-  # APPLY INFRASTRUCTURE
-  # ===========================================================================
   apply:
     name: Apply Infrastructure
     needs: [safety-checks, plan, approve]
@@ -172,10 +143,8 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      ARM_ACCESS_KEY: ${{ secrets.ARM_ACCESS_KEY }}
 
-  # ===========================================================================
-  # TRIGGER APP DEPLOYMENT
-  # ===========================================================================
   deploy-app:
     name: Deploy Application
     runs-on: ubuntu-latest
@@ -197,8 +166,6 @@ jobs:
               "deploy_method": "${{ inputs.app_deploy_method || 'kustomize' }}",
               "skip_tests": false,
               "triggered_by": "${{ github.actor }}",
-              "triggered_from": "${{ github.repository }}",
-              "infrastructure_run": "${{ github.run_id }}",
               "aks_cluster": "${{ needs.apply.outputs.cluster_name }}",
               "resource_group": "${{ needs.apply.outputs.resource_group }}"
             }
@@ -206,13 +173,8 @@ jobs:
       - name: Summary
         run: |
           echo "### 📡 Production App Deployment Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Cluster:** ${{ needs.apply.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Deploy Method:** ${{ inputs.app_deploy_method }}" >> $GITHUB_STEP_SUMMARY
 
-  # ===========================================================================
-  # DESTROY (Manual Only)
-  # ===========================================================================
   destroy:
     name: Destroy Infrastructure
     needs: [safety-checks, plan]
@@ -234,10 +196,8 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      ARM_ACCESS_KEY: ${{ secrets.ARM_ACCESS_KEY }}
 
-  # ===========================================================================
-  # NOTIFICATION
-  # ===========================================================================
   notify:
     name: Notify
     runs-on: ubuntu-latest
@@ -246,51 +206,19 @@ jobs:
     steps:
       - name: Final Summary
         run: |
-          ACTION="${{ needs.safety-checks.outputs.action }}"
-          
           echo "### 📋 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           
-          # Plan
           if [ "${{ needs.plan.result }}" == "success" ]; then
             echo "| Plan | ✅ Success |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Plan | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Apply
-          if [ "$ACTION" == "apply" ]; then
-            if [ "${{ needs.apply.result }}" == "success" ]; then
-              echo "| Apply | ✅ Success |" >> $GITHUB_STEP_SUMMARY
-            elif [ "${{ needs.apply.result }}" == "skipped" ]; then
-              echo "| Apply | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| Apply | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-            fi
+          if [ "${{ needs.apply.result }}" == "success" ]; then
+            echo "| Apply | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.apply.result }}" == "skipped" ]; then
+            echo "| Apply | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          # App Deployment
-          if [ "${{ inputs.deploy_app }}" == "true" ]; then
-            if [ "${{ needs.deploy-app.result }}" == "success" ]; then
-              echo "| App Deploy | ✅ Triggered |" >> $GITHUB_STEP_SUMMARY
-            elif [ "${{ needs.deploy-app.result }}" == "skipped" ]; then
-              echo "| App Deploy | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| App Deploy | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
-          
-          # Destroy
-          if [ "$ACTION" == "destroy" ]; then
-            if [ "${{ needs.destroy.result }}" == "success" ]; then
-              echo "| Destroy | 🗑️ Complete |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| Destroy | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY

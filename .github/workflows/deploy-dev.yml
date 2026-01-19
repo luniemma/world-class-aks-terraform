@@ -1,7 +1,3 @@
-# =============================================================================
-# DEPLOY TO DEV WITH APP DEPLOYMENT
-# Place this in: AKS-Terraform-repo/.github/workflows/deploy-dev.yml
-# =============================================================================
 name: Deploy to Dev
 
 on:
@@ -44,9 +40,6 @@ permissions:
   id-token: write
 
 jobs:
-  # ===========================================================================
-  # TERRAFORM DEPLOYMENT
-  # ===========================================================================
   infrastructure:
     name: Deploy Infrastructure
     uses: ./.github/workflows/terraform-reusable.yml
@@ -57,7 +50,7 @@ jobs:
       terraform_action: ${{ inputs.terraform_action || 'plan' }}
       enable_checkov: true
       enable_tfsec: true
-      enable_infracost: true
+      enable_infracost: false
       enable_post_deploy_tests: true
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -65,10 +58,8 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      ARM_ACCESS_KEY: ${{ secrets.ARM_ACCESS_KEY }}
 
-  # ===========================================================================
-  # TRIGGER APP DEPLOYMENT (Optional)
-  # ===========================================================================
   trigger-app:
     name: Trigger App Deployment
     runs-on: ubuntu-latest
@@ -90,8 +81,6 @@ jobs:
               "deploy_method": "${{ inputs.app_deploy_method || 'kustomize' }}",
               "skip_tests": false,
               "triggered_by": "${{ github.actor }}",
-              "triggered_from": "${{ github.repository }}",
-              "infrastructure_run": "${{ github.run_id }}",
               "aks_cluster": "${{ needs.infrastructure.outputs.cluster_name }}",
               "resource_group": "${{ needs.infrastructure.outputs.resource_group }}"
             }
@@ -99,15 +88,8 @@ jobs:
       - name: Summary
         run: |
           echo "### 📡 App Deployment Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "App deployment has been triggered in the application repository." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "**AKS Cluster:** ${{ needs.infrastructure.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Resource Group:** ${{ needs.infrastructure.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
 
-  # ===========================================================================
-  # SUMMARY
-  # ===========================================================================
   summary:
     name: Deployment Summary
     runs-on: ubuntu-latest
@@ -121,7 +103,6 @@ jobs:
           echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           
-          # Infrastructure status
           if [ "${{ needs.infrastructure.result }}" == "success" ]; then
             echo "| Infrastructure | ✅ Success |" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ needs.infrastructure.result }}" == "skipped" ]; then
@@ -130,18 +111,10 @@ jobs:
             echo "| Infrastructure | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # App deployment status
           if [ "${{ needs.trigger-app.result }}" == "success" ]; then
             echo "| App Deployment | ✅ Triggered |" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ needs.trigger-app.result }}" == "skipped" ]; then
             echo "| App Deployment | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| App Deployment | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -n "${{ needs.infrastructure.outputs.cluster_name }}" ]; then
-            echo "**Cluster:** ${{ needs.infrastructure.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Resource Group:** ${{ needs.infrastructure.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
           fi

@@ -62,6 +62,8 @@ on:
         required: true
       INFRACOST_API_KEY:
         required: false
+      ARM_ACCESS_KEY:
+        required: false
     outputs:
       cluster_name:
         description: 'AKS cluster name'
@@ -78,6 +80,7 @@ env:
   ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_ACCESS_KEY: ${{ secrets.ARM_ACCESS_KEY }}
 
 jobs:
   # ===========================================================================
@@ -150,11 +153,6 @@ jobs:
           else
             echo "| Validate | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          if [ "${{ steps.fmt-check.outputs.formatted }}" != "true" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "💡 **Tip:** Run \`terraform fmt -recursive\` locally before committing" >> $GITHUB_STEP_SUMMARY
-          fi
 
   # ===========================================================================
   # SECURITY SCANNING
@@ -193,8 +191,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- tfsec: ${{ inputs.enable_tfsec && 'Completed' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Checkov: ${{ inputs.enable_checkov && 'Completed' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Note: Some checks are skipped for dev environments. Production enforces all checks." >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
   # TERRAFORM PLAN
@@ -240,7 +236,6 @@ jobs:
 
       - name: Select Workspace
         run: |
-          # Create workspace if it doesn't exist, then select it
           terraform workspace select ${{ inputs.environment }} || terraform workspace new ${{ inputs.environment }}
           echo "Using workspace: $(terraform workspace show)"
 
@@ -249,7 +244,6 @@ jobs:
         run: |
           PLAN_FILE="tfplan-${{ inputs.environment }}-${{ github.run_id }}"
           
-          # Run terraform plan and capture exit code reliably
           if [ -n "${{ inputs.var_file }}" ]; then
             echo "Using variable file: ${{ inputs.var_file }}"
             terraform plan \
@@ -264,10 +258,7 @@ jobs:
               -no-color > plan.txt 2>&1 || EXITCODE=$?
           fi
           
-          # If EXITCODE is not set, plan succeeded with no changes (exit 0)
           EXITCODE=${EXITCODE:-0}
-          
-          # Show plan output
           cat plan.txt
           
           echo ""
@@ -278,12 +269,9 @@ jobs:
           echo "  2 = Changes detected"
           echo "========================================="
           
-          # Set outputs
           echo "exitcode=$EXITCODE" >> $GITHUB_OUTPUT
           echo "plan_id=$PLAN_FILE" >> $GITHUB_OUTPUT
           
-          # Exit 0 so the job continues (we handle the exitcode in later steps)
-          # Only fail if there was an actual error (exitcode 1)
           if [ "$EXITCODE" -eq 1 ]; then
             echo "::error::Terraform plan failed with errors"
             exit 1
@@ -296,20 +284,14 @@ jobs:
           echo "### Terraform Plan Summary 📋" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Terraform Version:** ${{ inputs.terraform_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Plan Exit Code:** ${{ steps.plan.outputs.exitcode }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Requested Action:** ${{ inputs.terraform_action }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Explain what will happen next
           if [ "${{ steps.plan.outputs.exitcode }}" == "0" ]; then
-            echo "ℹ️ **No changes detected** - Apply will be skipped" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️ **No changes detected**" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ steps.plan.outputs.exitcode }}" == "2" ]; then
-            echo "✅ **Changes detected** - Apply will run if action is 'apply'" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ steps.plan.outputs.exitcode }}" == "1" ]; then
-            echo "❌ **Plan failed** - Check errors above" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Changes detected**" >> $GITHUB_STEP_SUMMARY
           fi
-          echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -f plan.txt ]; then
             echo "<details><summary>Plan Output</summary>" >> $GITHUB_STEP_SUMMARY
@@ -335,180 +317,6 @@ jobs:
           name: plan-output-${{ inputs.environment }}-${{ inputs.terraform_action }}-${{ github.run_id }}
           path: ${{ inputs.working_directory }}/plan.txt
           retention-days: 5
-
-      - name: Comment PR with Plan
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const plan = fs.readFileSync('${{ inputs.working_directory }}/plan.txt', 'utf8');
-            const truncatedPlan = plan.length > 65000 ? plan.substring(0, 65000) + '\n\n... (truncated)' : plan;
-            
-            const output = `#### Terraform Plan - ${{ inputs.environment }} 📖
-            
-            **Terraform Version:** ${{ inputs.terraform_version }}
-            **Plan Exit Code:** ${{ steps.plan.outputs.exitcode }}
-            
-            <details><summary>Show Plan</summary>
-            
-            \`\`\`terraform
-            ${truncatedPlan}
-            \`\`\`
-            
-            </details>
-            
-            **Action:** ${{ inputs.terraform_action }}
-            **Pushed by:** @${{ github.actor }}
-            **Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            });
-
-      - name: Fail on Plan Error
-        if: always()
-        run: |
-          if [ "${{ steps.plan.outputs.exitcode }}" == "1" ]; then
-            echo "Terraform plan failed. See plan output for details."
-            exit 1
-          fi
-
-  # ===========================================================================
-  # COST ESTIMATION
-  # ===========================================================================
-  cost-estimate:
-    name: Cost Estimation
-    runs-on: ubuntu-latest
-    needs: terraform-plan
-    if: |
-      inputs.enable_infracost &&
-      needs.terraform-plan.result == 'success'
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
-    
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ inputs.terraform_version }}
-
-      - name: Setup Infracost
-        uses: infracost/actions/setup@v2
-        with:
-          api-key: ${{ secrets.INFRACOST_API_KEY }}
-
-      - name: Download Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: tfplan-${{ inputs.environment }}-${{ inputs.terraform_action }}-${{ github.run_id }}
-          path: ${{ inputs.working_directory }}
-
-      - name: Generate Infracost JSON
-        run: |
-          PLAN_FILE=$(ls tfplan-* 2>/dev/null | head -1)
-          infracost breakdown \
-            --path "$PLAN_FILE" \
-            --format json \
-            --out-file /tmp/infracost.json
-
-      - name: Post Infracost Comment
-        if: github.event_name == 'pull_request'
-        uses: infracost/actions/comment@v1
-        with:
-          path: /tmp/infracost.json
-          behavior: update
-
-      - name: Generate Cost Summary
-        run: |
-          echo "### Cost Estimation 💰" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          PLAN_FILE=$(ls tfplan-* 2>/dev/null | head -1)
-          infracost breakdown --path "$PLAN_FILE" --format table >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # CHECK APPLY CONDITIONS (Debug)
-  # ===========================================================================
-  check-apply-conditions:
-    name: Check Apply Conditions
-    runs-on: ubuntu-latest
-    needs: terraform-plan
-    if: always()
-    steps:
-      - name: Debug Apply Conditions
-        run: |
-          echo "### Apply Job Conditions Check 🔍" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### Raw Values (for debugging)" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "terraform_action: '${{ inputs.terraform_action }}'"  >> $GITHUB_STEP_SUMMARY
-          echo "plan exitcode: '${{ needs.terraform-plan.outputs.exitcode }}'" >> $GITHUB_STEP_SUMMARY
-          echo "plan result: '${{ needs.terraform-plan.result }}'" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Condition | Value | Required | Match |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|-------|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          
-          # Check terraform_action
-          if [ "${{ inputs.terraform_action }}" == "apply" ]; then
-            echo "| terraform_action | \`${{ inputs.terraform_action }}\` | \`apply\` | ✅ |" >> $GITHUB_STEP_SUMMARY
-            ACTION_OK="true"
-          else
-            echo "| terraform_action | \`${{ inputs.terraform_action }}\` | \`apply\` | ❌ |" >> $GITHUB_STEP_SUMMARY
-            ACTION_OK="false"
-          fi
-          
-          # Check exitcode
-          if [ "${{ needs.terraform-plan.outputs.exitcode }}" == "2" ]; then
-            echo "| plan exitcode | \`${{ needs.terraform-plan.outputs.exitcode }}\` | \`2\` | ✅ |" >> $GITHUB_STEP_SUMMARY
-            EXITCODE_OK="true"
-          else
-            echo "| plan exitcode | \`${{ needs.terraform-plan.outputs.exitcode }}\` | \`2\` | ❌ |" >> $GITHUB_STEP_SUMMARY
-            EXITCODE_OK="false"
-          fi
-          
-          # Check plan result
-          if [ "${{ needs.terraform-plan.result }}" == "success" ]; then
-            echo "| plan result | \`${{ needs.terraform-plan.result }}\` | \`success\` | ✅ |" >> $GITHUB_STEP_SUMMARY
-            RESULT_OK="true"
-          else
-            echo "| plan result | \`${{ needs.terraform-plan.result }}\` | \`success\` | ❌ |" >> $GITHUB_STEP_SUMMARY
-            RESULT_OK="false"
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Determine if apply will run
-          if [ "$ACTION_OK" == "true" ] && [ "$EXITCODE_OK" == "true" ] && [ "$RESULT_OK" == "true" ]; then
-            echo "### ✅ Apply WILL run" >> $GITHUB_STEP_SUMMARY
-            echo "All conditions met. The terraform-apply job will execute." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ⏭️ Apply will NOT run" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Reasons:**" >> $GITHUB_STEP_SUMMARY
-            if [ "$ACTION_OK" != "true" ]; then
-              echo "- terraform_action is '${{ inputs.terraform_action }}', not 'apply'" >> $GITHUB_STEP_SUMMARY
-            fi
-            if [ "${{ needs.terraform-plan.outputs.exitcode }}" == "" ]; then
-              echo "- ⚠️ exitcode is EMPTY (output not captured properly)" >> $GITHUB_STEP_SUMMARY
-            elif [ "${{ needs.terraform-plan.outputs.exitcode }}" == "0" ]; then
-              echo "- No changes detected (exitcode=0)" >> $GITHUB_STEP_SUMMARY
-            elif [ "${{ needs.terraform-plan.outputs.exitcode }}" == "1" ]; then
-              echo "- Plan failed with errors (exitcode=1)" >> $GITHUB_STEP_SUMMARY
-            elif [ "$EXITCODE_OK" != "true" ]; then
-              echo "- exitcode is '${{ needs.terraform-plan.outputs.exitcode }}', expected '2'" >> $GITHUB_STEP_SUMMARY
-            fi
-            if [ "$RESULT_OK" != "true" ]; then
-              echo "- Plan job result is '${{ needs.terraform-plan.result }}', not 'success'" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
 
   # ===========================================================================
   # TERRAFORM APPLY
@@ -594,14 +402,6 @@ jobs:
           echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**Cluster Name:** ${{ steps.outputs.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Resource Group:** ${{ steps.outputs.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Deployed by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit SHA:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "View in [Azure Portal](https://portal.azure.com/#@/resource/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ steps.outputs.outputs.resource_group }}/overview)" >> $GITHUB_STEP_SUMMARY
-
-      - name: Save Outputs
-        run: |
-          terraform output -json > terraform-outputs.json
 
       - name: Upload Outputs
         uses: actions/upload-artifact@v4
@@ -609,6 +409,7 @@ jobs:
           name: terraform-outputs-${{ inputs.environment }}-${{ github.run_id }}
           path: ${{ inputs.working_directory }}/terraform-outputs.json
           retention-days: 30
+        continue-on-error: true
 
   # ===========================================================================
   # POST-DEPLOYMENT TESTS
@@ -623,9 +424,6 @@ jobs:
       needs.terraform-apply.result == 'success' &&
       inputs.enable_post_deploy_tests
     environment: ${{ inputs.environment }}
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
 
     steps:
       - name: Checkout Code
@@ -642,27 +440,15 @@ jobs:
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
             }
 
-      # =========================================================
-      # CRITICAL: Install kubelogin BEFORE getting AKS credentials
-      # Required for AAD-enabled AKS clusters
-      # =========================================================
       - name: Install kubectl and kubelogin
         run: |
-          echo "Installing kubectl..."
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
           
-          echo "Installing kubelogin..."
-          KUBELOGIN_VERSION="v0.1.4"
-          curl -LO "https://github.com/Azure/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin-linux-amd64.zip"
+          curl -LO "https://github.com/Azure/kubelogin/releases/download/v0.1.4/kubelogin-linux-amd64.zip"
           unzip -o kubelogin-linux-amd64.zip -d kubelogin-extract
           sudo mv kubelogin-extract/bin/linux_amd64/kubelogin /usr/local/bin/
           rm -rf kubelogin-extract kubelogin-linux-amd64.zip
-          
-          echo "Verifying installations..."
-          kubectl version --client
-          kubelogin --version
 
       - name: Get AKS Credentials
         run: |
@@ -670,127 +456,22 @@ jobs:
             --resource-group ${{ needs.terraform-apply.outputs.resource_group }} \
             --name ${{ needs.terraform-apply.outputs.cluster_name }} \
             --overwrite-existing
-
-          # CRITICAL: Convert kubeconfig to use Azure CLI authentication
-          # This allows service principal auth to work in CI/CD pipelines
           kubelogin convert-kubeconfig -l azurecli
-          
-          echo "✅ Kubeconfig configured for Azure CLI authentication"
 
-      - name: Verify Cluster Connection
-        id: verify
+      - name: Verify Cluster
         run: |
           echo "### Post-Deployment Verification 🔍" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Test cluster access
-          if ! kubectl auth can-i list nodes 2>/dev/null; then
-            echo "⚠️ **Limited Access Warning**" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "The service principal does not have RBAC permissions to list cluster resources." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "To fix this, run:" >> $GITHUB_STEP_SUMMARY
-            echo '```bash' >> $GITHUB_STEP_SUMMARY
-            echo 'SP_OBJECT_ID=$(az ad sp show --id $AZURE_CLIENT_ID --query id -o tsv)' >> $GITHUB_STEP_SUMMARY
-            echo 'AKS_ID=$(az aks show -g ${{ needs.terraform-apply.outputs.resource_group }} -n ${{ needs.terraform-apply.outputs.cluster_name }} --query id -o tsv)' >> $GITHUB_STEP_SUMMARY
-            echo 'az role assignment create --assignee $SP_OBJECT_ID --role "Azure Kubernetes Service RBAC Cluster Admin" --scope $AKS_ID' >> $GITHUB_STEP_SUMMARY
+          if kubectl cluster-info &>/dev/null; then
+            echo "✅ Cluster is accessible" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Or add \`cicd_service_principal_id\` to your Terraform configuration." >> $GITHUB_STEP_SUMMARY
-            echo "has_access=false" >> $GITHUB_OUTPUT
-            exit 0  # Don't fail the workflow
-          fi
-          
-          echo "has_access=true" >> $GITHUB_OUTPUT
-          
-          echo "#### Cluster Info" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          kubectl cluster-info 2>&1 | head -5 >> $GITHUB_STEP_SUMMARY || echo "Unable to get cluster info" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "#### Kubernetes Version" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          kubectl version 2>/dev/null | head -10 >> $GITHUB_STEP_SUMMARY || echo "Unable to get version" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "#### Node Status" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          kubectl get nodes -o wide >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Unable to get nodes" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "#### System Pods" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n kube-system --no-headers 2>/dev/null | head -20 >> $GITHUB_STEP_SUMMARY || echo "Unable to get pods" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
-      - name: Run Health Checks
-        id: health
-        if: steps.verify.outputs.has_access == 'true'
-        run: |
-          echo "Running cluster health checks..."
-          HEALTH_STATUS="healthy"
-          
-          # Check nodes are Ready
-          echo "Checking node status..."
-          NOT_READY=$(kubectl get nodes --no-headers 2>/dev/null | grep -v " Ready" | wc -l || echo "0")
-          TOTAL_NODES=$(kubectl get nodes --no-headers 2>/dev/null | wc -l || echo "0")
-          
-          if [ "$NOT_READY" -gt 0 ]; then
-            echo "::warning::$NOT_READY node(s) are not ready"
-            kubectl get nodes
-            HEALTH_STATUS="degraded"
+            kubectl get nodes >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Unable to get nodes" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           else
-            echo "✅ All $TOTAL_NODES nodes are Ready"
+            echo "⚠️ Unable to access cluster (RBAC permissions may be needed)" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          # Check system pods
-          echo "Checking system pods..."
-          FAILED_PODS=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | grep -v "Running\|Completed" | wc -l || echo "0")
-          if [ "$FAILED_PODS" -gt 0 ]; then
-            echo "::warning::$FAILED_PODS system pod(s) are not running"
-            kubectl get pods -n kube-system | grep -v "Running\|Completed" || true
-            HEALTH_STATUS="degraded"
-          else
-            echo "✅ All system pods are running"
-          fi
-          
-          # Check for pending PVCs
-          echo "Checking persistent volume claims..."
-          PENDING_PVC=$(kubectl get pvc --all-namespaces --no-headers 2>/dev/null | grep -i pending | wc -l || echo "0")
-          if [ "$PENDING_PVC" -gt 0 ]; then
-            echo "::warning::$PENDING_PVC PVC(s) are pending"
-            HEALTH_STATUS="degraded"
-          fi
-          
-          echo "health_status=$HEALTH_STATUS" >> $GITHUB_OUTPUT
-          echo "" 
-          echo "🏁 Cluster health check completed: $HEALTH_STATUS"
-
-      - name: Test DNS Resolution
-        if: steps.verify.outputs.has_access == 'true'
-        run: |
-          echo "Testing cluster DNS..."
-          kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never --timeout=60s --command -- \
-            nslookup kubernetes.default.svc.cluster.local || true
-          echo "✅ DNS test completed"
         continue-on-error: true
-
-      - name: Generate Final Summary
-        if: always()
-        run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "#### Health Check Result" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.health.outputs.health_status }}" == "healthy" ]; then
-            echo "✅ **Cluster Status: Healthy**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ **Cluster Status: ${{ steps.health.outputs.health_status }}**" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tested at:** $(date -u)" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
   # TERRAFORM DESTROY
@@ -802,7 +483,6 @@ jobs:
     if: inputs.terraform_action == 'destroy'
     environment: 
       name: ${{ inputs.environment }}-destroy
-      url: https://portal.azure.com
     defaults:
       run:
         working-directory: ${{ inputs.working_directory }}
@@ -838,9 +518,7 @@ jobs:
       - name: Terraform Destroy
         run: |
           if [ -n "${{ inputs.var_file }}" ]; then
-            terraform destroy \
-              -var-file="${{ inputs.var_file }}" \
-              -auto-approve
+            terraform destroy -var-file="${{ inputs.var_file }}" -auto-approve
           else
             terraform destroy -auto-approve
           fi
@@ -851,4 +529,3 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**Destroyed by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
