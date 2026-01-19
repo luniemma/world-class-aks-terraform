@@ -1,15 +1,20 @@
+# =============================================================================
+# DEPLOY TO PRODUCTION WITH APP DEPLOYMENT
+# Place this in: AKS-Terraform-repo/.github/workflows/deploy-prod.yml
+# =============================================================================
 name: Deploy to Production
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
+      - 'modules/**'
       - 'environments/prod.tfvars'
+      - '*.tf'
   workflow_dispatch:
     inputs:
       terraform_action:
-        description: 'Terraform action to perform'
+        description: 'Terraform action'
         required: true
         type: choice
         options:
@@ -17,16 +22,24 @@ on:
           - apply
           - destroy
         default: 'plan'
-      skip_tests:
-        description: 'Skip pre-deployment tests'
-        required: false
-        type: boolean
-        default: false
       confirm_production:
-        description: 'Type "PRODUCTION" to confirm apply/destroy'
+        description: 'Type PRODUCTION to confirm apply/destroy'
         required: false
         type: string
         default: ''
+      deploy_app:
+        description: 'Deploy app after infrastructure'
+        required: false
+        type: boolean
+        default: false
+      app_deploy_method:
+        description: 'App deployment method'
+        required: false
+        type: choice
+        options:
+          - kustomize
+          - helm
+        default: 'kustomize'
 
 permissions:
   contents: write
@@ -52,8 +65,8 @@ jobs:
           
           # Determine action
           if [ "${{ github.event_name }}" == "push" ]; then
-            ACTION="plan"  # Push only triggers plan, not apply
-            echo "Push event detected - will only run plan"
+            ACTION="plan"
+            echo "Push event - will only run plan"
           else
             ACTION="${{ inputs.terraform_action }}"
           fi
@@ -63,7 +76,7 @@ jobs:
           # Require confirmation for apply/destroy
           if [ "$ACTION" == "apply" ] || [ "$ACTION" == "destroy" ]; then
             if [ "${{ inputs.confirm_production }}" != "PRODUCTION" ]; then
-              echo "::error::Production $ACTION requires typing 'PRODUCTION' in the confirm_production field"
+              echo "::error::Production $ACTION requires typing 'PRODUCTION'"
               PROCEED="false"
             fi
           fi
@@ -82,8 +95,6 @@ jobs:
             else
               echo "| Confirmation | ❌ Required |" >> $GITHUB_STEP_SUMMARY
             fi
-          else
-            echo "| Confirmation | ⏭️ Not required for plan |" >> $GITHUB_STEP_SUMMARY
           fi
           echo "| Proceed | $PROCEED |" >> $GITHUB_STEP_SUMMARY
 
@@ -92,90 +103,12 @@ jobs:
         run: exit 1
 
   # ===========================================================================
-  # PRE-DEPLOYMENT CHECKS
+  # PLAN INFRASTRUCTURE
   # ===========================================================================
-  pre-deployment-checks:
-    name: Pre-Deployment Checks
-    runs-on: ubuntu-latest
+  plan:
+    name: Plan Infrastructure
     needs: safety-checks
     if: needs.safety-checks.outputs.proceed == 'true'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Validate Production Config
-        run: |
-          echo "### Pre-Deployment Validation 📋" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check if prod.tfvars exists
-          if [ ! -f "environments/prod.tfvars" ]; then
-            echo "❌ Production tfvars file not found" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-          echo "✅ Production tfvars file exists" >> $GITHUB_STEP_SUMMARY
-          
-          # Verify critical settings
-          if grep -q "enable_private_cluster *= *true" environments/prod.tfvars; then
-            echo "✅ Private cluster enabled" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ Warning: Private cluster not enabled (recommended for production)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          # Check node count
-          NODE_COUNT=$(grep -oP 'node_count\s*=\s*\K\d+' environments/prod.tfvars || echo "0")
-          if [ "$NODE_COUNT" -lt 3 ]; then
-            echo "⚠️ Warning: Node count ($NODE_COUNT) is less than 3 (recommended for HA)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ Node count: $NODE_COUNT" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Pre-deployment checks completed" >> $GITHUB_STEP_SUMMARY
-
-      - name: Check for Breaking Changes
-        run: |
-          echo "Checking for breaking changes..."
-          # Add your custom validation logic here
-
-  # ===========================================================================
-  # SECURITY AUDIT
-  # ===========================================================================
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    needs: pre-deployment-checks
-    if: inputs.skip_tests != true
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Run Security Audit
-        run: |
-          echo "### Security Audit 🔒" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check for hardcoded secrets
-          if grep -rE "(password|secret|key)\s*=\s*\"[^\"]+\"" --include="*.tf" --include="*.tfvars" . 2>/dev/null | grep -v "var\." | grep -v "data\."; then
-            echo "⚠️ Warning: Possible hardcoded secrets detected" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ No hardcoded secrets detected" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Security audit completed" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # PLAN PRODUCTION
-  # ===========================================================================
-  plan-production:
-    name: Plan Production
-    needs: [safety-checks, pre-deployment-checks, security-audit]
-    if: |
-      always() &&
-      needs.safety-checks.outputs.proceed == 'true' &&
-      needs.pre-deployment-checks.result == 'success' &&
-      (needs.security-audit.result == 'success' || needs.security-audit.result == 'skipped')
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: prod
@@ -194,38 +127,33 @@ jobs:
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
 
   # ===========================================================================
-  # APPROVE PRODUCTION
+  # APPROVAL GATE
   # ===========================================================================
-  approve-production:
-    name: Approve Production Deployment
+  approve:
+    name: Approve Deployment
     runs-on: ubuntu-latest
-    needs: [safety-checks, plan-production]
+    needs: [safety-checks, plan]
     if: |
-      needs.plan-production.outputs.plan_exitcode == '2' &&
+      needs.plan.outputs.plan_exitcode == '2' &&
       needs.safety-checks.outputs.action == 'apply'
     environment:
       name: prod-approval
     steps:
-      - name: Manual Approval Required
+      - name: Approved
         run: |
-          echo "### 🚨 Production Deployment Approval" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Changes detected in production plan.**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This deployment has been approved by: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Proceeding with deployment..." >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Production Deployment Approved" >> $GITHUB_STEP_SUMMARY
+          echo "Approved by: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
-  # DEPLOY PRODUCTION
+  # APPLY INFRASTRUCTURE
   # ===========================================================================
-  deploy-production:
-    name: Deploy to Production
-    needs: [safety-checks, plan-production, approve-production]
+  apply:
+    name: Apply Infrastructure
+    needs: [safety-checks, plan, approve]
     if: |
       always() &&
-      needs.plan-production.result == 'success' &&
-      needs.approve-production.result == 'success' &&
+      needs.plan.result == 'success' &&
+      needs.approve.result == 'success' &&
       needs.safety-checks.outputs.action == 'apply'
     uses: ./.github/workflows/terraform-reusable.yml
     with:
@@ -237,7 +165,7 @@ jobs:
       enable_checkov: false
       enable_tfsec: false
       enable_infracost: false
-      enable_post_deploy_tests: false  # Using custom validation below
+      enable_post_deploy_tests: true
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -246,148 +174,49 @@ jobs:
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
 
   # ===========================================================================
-  # POST-DEPLOYMENT VALIDATION
+  # TRIGGER APP DEPLOYMENT
   # ===========================================================================
-  post-deployment-validation:
-    name: Post-Deployment Validation
+  deploy-app:
+    name: Deploy Application
     runs-on: ubuntu-latest
-    needs: deploy-production
+    needs: apply
     if: |
-      always() &&
-      needs.deploy-production.result == 'success' &&
-      needs.deploy-production.outputs.cluster_name != ''
+      inputs.deploy_app == true &&
+      needs.apply.result == 'success' &&
+      needs.apply.outputs.cluster_name != ''
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Azure Login
-        uses: azure/login@v1
+      - name: Trigger App Repository
+        uses: peter-evans/repository-dispatch@v2
         with:
-          creds: |
+          token: ${{ secrets.APP_DEPLOY_TOKEN }}
+          repository: ${{ vars.APP_REPOSITORY || 'luniemma/DevOps-cloud-learning-platform' }}
+          event-type: deploy-app
+          client-payload: |
             {
-              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+              "environment": "production",
+              "deploy_method": "${{ inputs.app_deploy_method || 'kustomize' }}",
+              "skip_tests": false,
+              "triggered_by": "${{ github.actor }}",
+              "triggered_from": "${{ github.repository }}",
+              "infrastructure_run": "${{ github.run_id }}",
+              "aks_cluster": "${{ needs.apply.outputs.cluster_name }}",
+              "resource_group": "${{ needs.apply.outputs.resource_group }}"
             }
 
-      # =========================================================
-      # CRITICAL: Install kubelogin BEFORE getting AKS credentials
-      # Required for AAD-enabled AKS clusters
-      # =========================================================
-      - name: Install kubectl and kubelogin
+      - name: Summary
         run: |
-          echo "Installing kubectl..."
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-          
-          echo "Installing kubelogin..."
-          KUBELOGIN_VERSION="v0.1.4"
-          curl -LO "https://github.com/Azure/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin-linux-amd64.zip"
-          unzip -o kubelogin-linux-amd64.zip -d kubelogin-extract
-          sudo mv kubelogin-extract/bin/linux_amd64/kubelogin /usr/local/bin/
-          rm -rf kubelogin-extract kubelogin-linux-amd64.zip
-          
-          echo "Verifying installations..."
-          kubectl version --client
-          kubelogin --version
-
-      - name: Get AKS Credentials
-        run: |
-          az aks get-credentials \
-            --resource-group ${{ needs.deploy-production.outputs.resource_group }} \
-            --name ${{ needs.deploy-production.outputs.cluster_name }} \
-            --overwrite-existing
-          
-          # CRITICAL: Convert kubeconfig for Azure CLI authentication
-          kubelogin convert-kubeconfig -l azurecli
-          
-          echo "✅ Kubeconfig configured for Azure CLI authentication"
-
-      - name: Comprehensive Health Check
-        id: health
-        run: |
-          echo "### Production Deployment Validation ✅" >> $GITHUB_STEP_SUMMARY
+          echo "### 📡 Production App Deployment Triggered" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          HEALTH_STATUS="healthy"
-          
-          # Check nodes
-          echo "#### Node Status" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          kubectl get nodes -o wide >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Verify all nodes are ready
-          NODES_READY=$(kubectl get nodes --no-headers | grep -c " Ready" || echo "0")
-          TOTAL_NODES=$(kubectl get nodes --no-headers | wc -l)
-          
-          if [ "$NODES_READY" -ne "$TOTAL_NODES" ] || [ "$TOTAL_NODES" -eq 0 ]; then
-            echo "❌ Not all nodes are ready ($NODES_READY/$TOTAL_NODES)" >> $GITHUB_STEP_SUMMARY
-            HEALTH_STATUS="degraded"
-          else
-            echo "✅ All $TOTAL_NODES nodes are ready" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check system pods
-          echo "#### System Pods Status" >> $GITHUB_STEP_SUMMARY
-          SYSTEM_PODS_RUNNING=$(kubectl get pods -n kube-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l || echo "0")
-          SYSTEM_PODS_TOTAL=$(kubectl get pods -n kube-system --no-headers 2>/dev/null | wc -l || echo "0")
-          echo "Running system pods: $SYSTEM_PODS_RUNNING / $SYSTEM_PODS_TOTAL" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check for failed pods
-          FAILED_PODS=$(kubectl get pods -A --field-selector=status.phase=Failed --no-headers 2>/dev/null | wc -l || echo "0")
-          if [ "$FAILED_PODS" -gt 0 ]; then
-            echo "⚠️ Warning: $FAILED_PODS failed pods detected" >> $GITHUB_STEP_SUMMARY
-            HEALTH_STATUS="degraded"
-          fi
-          
-          # Check critical components
-          echo "#### Critical Components" >> $GITHUB_STEP_SUMMARY
-          
-          # CoreDNS
-          COREDNS=$(kubectl get pods -n kube-system -l k8s-app=kube-dns --no-headers 2>/dev/null | grep -c Running || echo "0")
-          if [ "$COREDNS" -gt 0 ]; then
-            echo "✅ CoreDNS: $COREDNS pods running" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ CoreDNS: Not running" >> $GITHUB_STEP_SUMMARY
-            HEALTH_STATUS="critical"
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "health_status=$HEALTH_STATUS" >> $GITHUB_OUTPUT
-          
-          if [ "$HEALTH_STATUS" == "critical" ]; then
-            echo "❌ Production validation FAILED - critical components not running" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          elif [ "$HEALTH_STATUS" == "degraded" ]; then
-            echo "⚠️ Production validation completed with warnings" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ Production deployment validated successfully" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Create Deployment Tag
-        if: success()
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          TAG_NAME="prod-$(date +'%Y%m%d-%H%M%S')"
-          git tag -a "$TAG_NAME" -m "Production deployment $TAG_NAME by ${{ github.actor }}"
-          git push origin "$TAG_NAME" || echo "::warning::Failed to push tag (may require permissions)"
+          echo "**Cluster:** ${{ needs.apply.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deploy Method:** ${{ inputs.app_deploy_method }}" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
-  # DESTROY PRODUCTION
+  # DESTROY (Manual Only)
   # ===========================================================================
-  destroy-production:
-    name: Destroy Production
-    needs: [safety-checks, plan-production]
-    if: |
-      needs.safety-checks.outputs.action == 'destroy' &&
-      needs.safety-checks.outputs.proceed == 'true'
+  destroy:
+    name: Destroy Infrastructure
+    needs: [safety-checks, plan]
+    if: needs.safety-checks.outputs.action == 'destroy'
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: prod
@@ -409,62 +238,59 @@ jobs:
   # ===========================================================================
   # NOTIFICATION
   # ===========================================================================
-  notify-deployment:
-    name: Notify Deployment
+  notify:
+    name: Notify
     runs-on: ubuntu-latest
-    needs: [safety-checks, deploy-production, post-deployment-validation, destroy-production]
+    needs: [safety-checks, plan, apply, deploy-app, destroy]
     if: always()
     steps:
-      - name: Deployment Status
+      - name: Final Summary
         run: |
           ACTION="${{ needs.safety-checks.outputs.action }}"
           
-          if [ "$ACTION" == "apply" ]; then
-            if [ "${{ needs.post-deployment-validation.result }}" == "success" ]; then
-              echo "### ✅ Production Deployment Successful" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-              echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-              echo "| Cluster | ${{ needs.deploy-production.outputs.cluster_name }} |" >> $GITHUB_STEP_SUMMARY
-              echo "| Resource Group | ${{ needs.deploy-production.outputs.resource_group }} |" >> $GITHUB_STEP_SUMMARY
-              echo "| Deployed by | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
-              echo "| Timestamp | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
-            elif [ "${{ needs.deploy-production.result }}" == "skipped" ]; then
-              echo "### ⏭️ Production Deployment Skipped" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "No changes detected or approval not granted." >> $GITHUB_STEP_SUMMARY
-            else
-              echo "### ❌ Production Deployment Failed" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "Please check the logs and retry." >> $GITHUB_STEP_SUMMARY
-            fi
-          elif [ "$ACTION" == "destroy" ]; then
-            if [ "${{ needs.destroy-production.result }}" == "success" ]; then
-              echo "### 🗑️ Production Destroyed" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "Production environment has been destroyed by @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "### ❌ Production Destroy Failed" >> $GITHUB_STEP_SUMMARY
-            fi
+          echo "### 📋 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Plan
+          if [ "${{ needs.plan.result }}" == "success" ]; then
+            echo "| Plan | ✅ Success |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### 📋 Production Plan Completed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Plan exit code: ${{ needs.plan-production.outputs.plan_exitcode }}" >> $GITHUB_STEP_SUMMARY
-            if [ "${{ needs.plan-production.outputs.plan_exitcode }}" == "2" ]; then
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "⚠️ Changes detected. Run with 'apply' action to deploy." >> $GITHUB_STEP_SUMMARY
+            echo "| Plan | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Apply
+          if [ "$ACTION" == "apply" ]; then
+            if [ "${{ needs.apply.result }}" == "success" ]; then
+              echo "| Apply | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ needs.apply.result }}" == "skipped" ]; then
+              echo "| Apply | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Apply | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
             fi
           fi
-
-      # Add your notification integrations here
-      # Example: Slack notification
-      # - name: Send Slack Notification
-      #   if: always()
-      #   uses: slackapi/slack-github-action@v1
-      #   with:
-      #     payload: |
-      #       {
-      #         "text": "Production ${{ needs.safety-checks.outputs.action }}: ${{ job.status }}"
-      #       }
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          
+          # App Deployment
+          if [ "${{ inputs.deploy_app }}" == "true" ]; then
+            if [ "${{ needs.deploy-app.result }}" == "success" ]; then
+              echo "| App Deploy | ✅ Triggered |" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ needs.deploy-app.result }}" == "skipped" ]; then
+              echo "| App Deploy | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| App Deploy | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          
+          # Destroy
+          if [ "$ACTION" == "destroy" ]; then
+            if [ "${{ needs.destroy.result }}" == "success" ]; then
+              echo "| Destroy | 🗑️ Complete |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Destroy | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
