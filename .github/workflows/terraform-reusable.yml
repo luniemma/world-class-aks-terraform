@@ -241,7 +241,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          PLAN_FILE="tfplan-${{ inputs.environment }}-${{ github.run_number }}"
+          PLAN_FILE="tfplan-${{ inputs.environment }}-${{ github.run_id }}"
           
           # Run terraform plan and capture exit code reliably
           if [ -n "${{ inputs.var_file }}" ]; then
@@ -318,7 +318,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ inputs.environment }}-${{ github.run_number }}
+          name: tfplan-${{ inputs.environment }}-${{ inputs.terraform_action }}-${{ github.run_id }}
           path: ${{ inputs.working_directory }}/tfplan-*
           retention-days: 5
 
@@ -326,7 +326,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: plan-output-${{ inputs.environment }}-${{ github.run_number }}
+          name: plan-output-${{ inputs.environment }}-${{ inputs.terraform_action }}-${{ github.run_id }}
           path: ${{ inputs.working_directory }}/plan.txt
           retention-days: 5
 
@@ -402,13 +402,14 @@ jobs:
       - name: Download Plan
         uses: actions/download-artifact@v4
         with:
-          name: tfplan-${{ inputs.environment }}-${{ github.run_number }}
+          name: tfplan-${{ inputs.environment }}-${{ inputs.terraform_action }}-${{ github.run_id }}
           path: ${{ inputs.working_directory }}
 
       - name: Generate Infracost JSON
         run: |
+          PLAN_FILE=$(ls tfplan-* 2>/dev/null | head -1)
           infracost breakdown \
-            --path tfplan-${{ inputs.environment }}-${{ github.run_number }} \
+            --path "$PLAN_FILE" \
             --format json \
             --out-file /tmp/infracost.json
 
@@ -423,9 +424,8 @@ jobs:
         run: |
           echo "### Cost Estimation 💰" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          infracost breakdown \
-            --path tfplan-${{ inputs.environment }}-${{ github.run_number }} \
-            --format table >> $GITHUB_STEP_SUMMARY
+          PLAN_FILE=$(ls tfplan-* 2>/dev/null | head -1)
+          infracost breakdown --path "$PLAN_FILE" --format table >> $GITHUB_STEP_SUMMARY
 
   # ===========================================================================
   # CHECK APPLY CONDITIONS (Debug)
@@ -553,16 +553,19 @@ jobs:
       - name: Download Plan
         uses: actions/download-artifact@v4
         with:
-          name: tfplan-${{ inputs.environment }}-${{ github.run_number }}
+          name: tfplan-${{ inputs.environment }}-${{ inputs.terraform_action }}-${{ github.run_id }}
           path: ${{ inputs.working_directory }}
 
       - name: Terraform Apply
         id: apply
         run: |
           echo "Applying Terraform plan..."
-          terraform apply \
-            -auto-approve \
-            tfplan-${{ inputs.environment }}-${{ github.run_number }}
+          PLAN_FILE=$(ls tfplan-* 2>/dev/null | head -1)
+          if [ -z "$PLAN_FILE" ]; then
+            echo "::error::Plan file not found"
+            exit 1
+          fi
+          terraform apply -auto-approve "$PLAN_FILE"
 
       - name: Get Terraform Outputs
         id: outputs
@@ -592,7 +595,7 @@ jobs:
       - name: Upload Outputs
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-outputs-${{ inputs.environment }}-${{ github.run_number }}
+          name: terraform-outputs-${{ inputs.environment }}-${{ github.run_id }}
           path: ${{ inputs.working_directory }}/terraform-outputs.json
           retention-days: 30
 
@@ -664,9 +667,30 @@ jobs:
           echo "✅ Kubeconfig configured for Azure CLI authentication"
 
       - name: Verify Cluster Connection
+        id: verify
         run: |
           echo "### Post-Deployment Verification 🔍" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Test cluster access
+          if ! kubectl auth can-i list nodes 2>/dev/null; then
+            echo "⚠️ **Limited Access Warning**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The service principal does not have RBAC permissions to list cluster resources." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "To fix this, run:" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo 'SP_OBJECT_ID=$(az ad sp show --id $AZURE_CLIENT_ID --query id -o tsv)' >> $GITHUB_STEP_SUMMARY
+            echo 'AKS_ID=$(az aks show -g ${{ needs.terraform-apply.outputs.resource_group }} -n ${{ needs.terraform-apply.outputs.cluster_name }} --query id -o tsv)' >> $GITHUB_STEP_SUMMARY
+            echo 'az role assignment create --assignee $SP_OBJECT_ID --role "Azure Kubernetes Service RBAC Cluster Admin" --scope $AKS_ID' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Or add \`cicd_service_principal_id\` to your Terraform configuration." >> $GITHUB_STEP_SUMMARY
+            echo "has_access=false" >> $GITHUB_OUTPUT
+            exit 0  # Don't fail the workflow
+          fi
+          
+          echo "has_access=true" >> $GITHUB_OUTPUT
           
           echo "#### Cluster Info" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -693,6 +717,7 @@ jobs:
 
       - name: Run Health Checks
         id: health
+        if: steps.verify.outputs.has_access == 'true'
         run: |
           echo "Running cluster health checks..."
           HEALTH_STATUS="healthy"
@@ -734,6 +759,7 @@ jobs:
           echo "🏁 Cluster health check completed: $HEALTH_STATUS"
 
       - name: Test DNS Resolution
+        if: steps.verify.outputs.has_access == 'true'
         run: |
           echo "Testing cluster DNS..."
           kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never --timeout=60s --command -- \
