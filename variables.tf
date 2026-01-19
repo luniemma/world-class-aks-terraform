@@ -129,6 +129,10 @@ variable "common_tags" {
   }
 }
 
+# =============================================================================
+# SECURITY VARIABLES
+# =============================================================================
+
 variable "os_disk_type" {
   description = "OS disk type: Managed or Ephemeral"
   type        = string
@@ -151,4 +155,10 @@ variable "disk_encryption_set_id" {
   description = "Disk encryption set ID for OS/data disk encryption"
   type        = string
   default     = null
+}
+
+variable "grant_deployer_cluster_admin" {
+  description = "Grant the deployer service principal AKS RBAC Cluster Admin role"
+  type        = bool
+  default     = true
 }

@@ -191,3 +191,19 @@ resource "azurerm_monitor_diagnostic_setting" "aks" {
     enabled  = true
   }
 }
+
+# =============================================================================
+# RBAC: Grant deployer service principal access to the cluster
+# This allows CI/CD pipelines to run kubectl commands
+# =============================================================================
+
+# Get current client config (the service principal running Terraform)
+data "azurerm_client_config" "current" {}
+
+# Grant the deployer SP "Azure Kubernetes Service RBAC Cluster Admin" role
+resource "azurerm_role_assignment" "aks_rbac_admin" {
+  count                = var.grant_deployer_cluster_admin ? 1 : 0
+  scope                = azurerm_kubernetes_cluster.main.id
+  role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
