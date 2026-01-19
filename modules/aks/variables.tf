@@ -107,3 +107,9 @@ variable "disk_encryption_set_id" {
   type        = string
   default     = null
 }
+
+variable "grant_deployer_cluster_admin" {
+  description = "Grant the Terraform deployer service principal AKS RBAC Cluster Admin role for post-deploy tests"
+  type        = bool
+  default     = true
+}

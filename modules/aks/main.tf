@@ -30,7 +30,7 @@ resource "azurerm_kubernetes_cluster" "main" {
   sku_tier                  = var.sku_tier
   private_cluster_enabled   = var.enable_private_cluster
   automatic_channel_upgrade = "patch"
-  disk_encryption_set_id    = var.disk_encryption_set_id # CKV_AZURE_117
+  disk_encryption_set_id    = var.disk_encryption_set_id  # CKV_AZURE_117
 
   # Default node pool configuration
   default_node_pool {
@@ -38,7 +38,7 @@ resource "azurerm_kubernetes_cluster" "main" {
     node_count                   = var.node_count
     vm_size                      = var.node_vm_size
     os_disk_size_gb              = var.node_os_disk_size_gb
-    os_disk_type                 = var.os_disk_type # Use "Ephemeral" for CKV_AZURE_226
+    os_disk_type                 = var.os_disk_type  # Use "Ephemeral" for CKV_AZURE_226
     vnet_subnet_id               = var.vnet_subnet_id
     type                         = "VirtualMachineScaleSets"
     temporary_name_for_rotation  = "systemtmp"
@@ -46,7 +46,7 @@ resource "azurerm_kubernetes_cluster" "main" {
     min_count                    = var.node_count
     max_count                    = var.node_count + 2
     max_pods                     = 110
-    only_critical_addons_enabled = var.only_critical_addons_enabled # CKV_AZURE_232
+    only_critical_addons_enabled = var.only_critical_addons_enabled  # CKV_AZURE_232
 
     # Enable host encryption for CKV_AZURE_227
     enable_host_encryption = var.enable_host_encryption
@@ -190,4 +190,20 @@ resource "azurerm_monitor_diagnostic_setting" "aks" {
     category = "AllMetrics"
     enabled  = true
   }
+}
+
+# =============================================================================
+# RBAC: Grant deployer service principal access to the cluster
+# This allows CI/CD pipelines to run kubectl commands
+# =============================================================================
+
+# Get current client config (the service principal running Terraform)
+data "azurerm_client_config" "current" {}
+
+# Grant the deployer SP "Azure Kubernetes Service RBAC Cluster Admin" role
+resource "azurerm_role_assignment" "aks_rbac_admin" {
+  count                = var.grant_deployer_cluster_admin ? 1 : 0
+  scope                = azurerm_kubernetes_cluster.main.id
+  role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
+  principal_id         = data.azurerm_client_config.current.object_id
 }
