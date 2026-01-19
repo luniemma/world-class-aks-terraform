@@ -14,11 +14,12 @@ terraform {
 
   # Backend configuration for remote state
   # Uncomment and configure for production use
-  backend "azurerm" {
-    resource_group_name  = "terraform-state-rg"
-    storage_account_name = "tfstateaksaccount"
-    container_name       = "tfstate"
-    key                  = "aks/terraform.tfstate"
+# Backend with workspace support - each environment gets its own state
+backend "azurerm" {
+  resource_group_name  = "terraform-state-rg"
+  storage_account_name = "tfstateaksproject"
+  container_name       = "tfstate"
+  key                  = "aks.tfstate"
     use_azuread_auth     = true # ⭐ ADD THIS LINE
   }
 
@@ -33,6 +34,10 @@ provider "azurerm" {
       purge_soft_delete_on_destroy    = false
       recover_soft_deleted_key_vaults = true
     }
+    log_analytics_workspace {
+      permanently_delete_on_destroy = true
+    }
+
   }
 }
 

@@ -1,0 +1,123 @@
+# =============================================================================
+# TRIGGER APP DEPLOYMENT WORKFLOW
+# Place this in: AKS-Terraform-repo/.github/workflows/trigger-app-deploy.yml
+# This workflow triggers the app deployment after AKS infrastructure is ready
+# =============================================================================
+name: Trigger App Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy app to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: 'staging'
+      deploy_method:
+        description: 'Deployment method'
+        required: false
+        type: choice
+        options:
+          - kustomize
+          - helm
+        default: 'kustomize'
+      skip_tests:
+        description: 'Skip tests in app pipeline'
+        required: false
+        type: boolean
+        default: false
+      app_repo:
+        description: 'App repository (owner/repo)'
+        required: false
+        type: string
+        default: ''
+
+  # Can be called from other workflows
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy app to'
+        required: true
+        type: string
+      deploy_method:
+        description: 'Deployment method'
+        required: false
+        type: string
+        default: 'kustomize'
+      skip_tests:
+        description: 'Skip tests'
+        required: false
+        type: boolean
+        default: false
+      app_repo:
+        description: 'App repository'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      APP_DEPLOY_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # Default app repository - change this to your app repo
+  DEFAULT_APP_REPO: 'luniemma/DevOps-cloud-learning-platform'
+
+jobs:
+  trigger-app-deployment:
+    name: Trigger App Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine App Repository
+        id: repo
+        run: |
+          APP_REPO="${{ inputs.app_repo }}"
+          if [ -z "$APP_REPO" ]; then
+            APP_REPO="${{ env.DEFAULT_APP_REPO }}"
+          fi
+          
+          # Split owner/repo
+          OWNER=$(echo "$APP_REPO" | cut -d'/' -f1)
+          REPO=$(echo "$APP_REPO" | cut -d'/' -f2)
+          
+          echo "owner=$OWNER" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "full_repo=$APP_REPO" >> $GITHUB_OUTPUT
+          
+          echo "Triggering deployment in: $APP_REPO"
+
+      - name: Trigger App Repository Dispatch
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.APP_DEPLOY_TOKEN }}
+          repository: ${{ steps.repo.outputs.full_repo }}
+          event-type: deploy-app
+          client-payload: |
+            {
+              "environment": "${{ inputs.environment }}",
+              "deploy_method": "${{ inputs.deploy_method }}",
+              "skip_tests": ${{ inputs.skip_tests }},
+              "triggered_by": "${{ github.actor }}",
+              "triggered_from": "${{ github.repository }}",
+              "infrastructure_run": "${{ github.run_id }}",
+              "aks_cluster": "${{ secrets.AKS_CLUSTER_NAME || 'unknown' }}",
+              "resource_group": "${{ secrets.AKS_RESOURCE_GROUP || 'unknown' }}"
+            }
+
+      - name: Summary
+        run: |
+          echo "### 📡 App Deployment Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App Repository | \`${{ steps.repo.outputs.full_repo }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Method | ${{ inputs.deploy_method }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip Tests | ${{ inputs.skip_tests }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the [app repository](${{ github.server_url }}/${{ steps.repo.outputs.full_repo }}/actions) for deployment status." >> $GITHUB_STEP_SUMMARY
