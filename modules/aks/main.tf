@@ -6,12 +6,7 @@ resource "azurerm_user_assigned_identity" "aks" {
 
   tags = var.common_tags
 }
-resource "azurerm_role_assignment" "aks_rbac_admin" {
-  count                = var.grant_deployer_cluster_admin ? 1 : 0
-  scope                = azurerm_kubernetes_cluster.main.id
-  role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
-  principal_id         = data.azurerm_client_config.current.object_id
-}
+
 # Role Assignment for Network Contributor on subnet
 resource "azurerm_role_assignment" "aks_network" {
   scope                = var.vnet_subnet_id
