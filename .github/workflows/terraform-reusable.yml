@@ -238,6 +238,12 @@ jobs:
           echo "Initializing Terraform..."
           terraform init
 
+      - name: Select Workspace
+        run: |
+          # Create workspace if it doesn't exist, then select it
+          terraform workspace select ${{ inputs.environment }} || terraform workspace new ${{ inputs.environment }}
+          echo "Using workspace: $(terraform workspace show)"
+
       - name: Terraform Plan
         id: plan
         run: |
@@ -550,6 +556,11 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      - name: Select Workspace
+        run: |
+          terraform workspace select ${{ inputs.environment }} || terraform workspace new ${{ inputs.environment }}
+          echo "Using workspace: $(terraform workspace show)"
+
       - name: Download Plan
         uses: actions/download-artifact@v4
         with:
@@ -818,6 +829,11 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
+
+      - name: Select Workspace
+        run: |
+          terraform workspace select ${{ inputs.environment }} || terraform workspace new ${{ inputs.environment }}
+          echo "Using workspace: $(terraform workspace show)"
 
       - name: Terraform Destroy
         run: |
