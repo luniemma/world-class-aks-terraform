@@ -32,7 +32,7 @@ log_retention_days = 30
 # RBAC - Azure AD Integration
 # ===================
 admin_group_object_ids = []
-
+grant_deployer_cluster_admin = true
 # ===================
 # Network Settings
 # ===================
