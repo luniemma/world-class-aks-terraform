@@ -129,31 +129,8 @@ variable "common_tags" {
   }
 }
 
-variable "os_disk_type" {
-  description = "OS disk type: Managed or Ephemeral"
-  type        = string
-  default     = "Managed"
-}
-
-variable "only_critical_addons_enabled" {
-  description = "Only run critical system pods on system nodes"
-  type        = bool
-  default     = false
-}
-
-variable "enable_host_encryption" {
-  description = "Enable encryption at host for temp disks/caches"
-  type        = bool
-  default     = false
-}
-
-variable "disk_encryption_set_id" {
-  description = "Disk encryption set ID for OS/data disk encryption"
-  type        = string
-  default     = null
-}
 # =============================================================================
-# ADD THESE TO YOUR ROOT variables.tf
+# SECURITY VARIABLES
 # =============================================================================
 
 variable "os_disk_type" {
