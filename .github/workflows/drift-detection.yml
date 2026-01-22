@@ -19,7 +19,8 @@ on:
 permissions:
   contents: read
   issues: write
-
+  id-token: write
+  
 env:
   TERRAFORM_VERSION: '1.6.0'
 

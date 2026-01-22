@@ -63,6 +63,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  id-token: write
 
 env:
   # Default app repository - change this to your app repo
