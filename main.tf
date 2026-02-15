@@ -12,18 +12,13 @@ terraform {
     }
   }
 
-  # Backend configuration for remote state
-  # Uncomment and configure for production use
-# Backend with workspace support - each environment gets its own state
-backend "azurerm" {
-  resource_group_name  = "terraform-state-rg"
-  storage_account_name = "tfstateaksproject"
-  container_name       = "tfstate"
-  key                  = "aks/terraform.tfstate"
-    use_azuread_auth     = true # ⭐ ADD THIS LINE
+  # Backend with workspace support - each environment gets its own state
+  backend "azurerm" {
+    resource_group_name  = "terraform-state-rg"
+    storage_account_name = "tfstateaksproject"
+    container_name       = "tfstate"
+    key                  = "aks/terraform.tfstate"
   }
-
-
 }
 provider "azurerm" {
   features {
