@@ -20,9 +20,14 @@ permissions:
   contents: read
   issues: write
   id-token: write
+  pull-requests: write
+  repository-projects: write
+  packages: write
+  actions: write
   
 env:
   TERRAFORM_VERSION: '1.6.0'
+  LOCK_TIME: '300s'
 
 jobs:
   drift-detection-dev:
