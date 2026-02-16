@@ -97,31 +97,27 @@ nano terraform.tfvars
 az group create --name terraform-state-rg --location eastus
 
 az storage account create \
-  --name tfstateaksaccount \
+  --name tfstateaksproject \
   --resource-group terraform-state-rg \
   --location eastus \
   --sku Standard_LRS
 
 az storage container create \
   --name tfstate \
-  --account-name tfstateaksaccount
-
-# Get storage account key
-az storage account keys list \
-  --resource-group terraform-state-rg \
-  --account-name tfstateaksaccount \
-  --query '[0].value' -o tsv
+  --account-name tfstateaksproject
 ```
 
-Update `main.tf` backend configuration:
+The backend is configured in `main.tf`:
 ```hcl
 backend "azurerm" {
   resource_group_name  = "terraform-state-rg"
-  storage_account_name = "tfstateaksaccount"
+  storage_account_name = "tfstateaksproject"
   container_name       = "tfstate"
   key                  = "aks/terraform.tfstate"
 }
 ```
+
+**Backend Authentication**: CI/CD workflows authenticate to the storage backend by fetching the storage account access key at runtime via `az storage account keys list`. The service principal needs **Contributor** role on the storage account resource group. See the [Drift Detection](#-drift-detection) section for details.
 
 ### 3. Deploy Infrastructure
 
@@ -252,6 +248,35 @@ gh auth login
 | `deploy-prod.yml` | Deploy to production (with approval) | Push to `main` or manual |
 | `manual-operations.yml` | Manual Terraform operations | Manual only |
 | `drift-detection.yml` | Daily drift detection | Scheduled + manual |
+
+### 🔍 Drift Detection
+
+The drift detection workflow runs daily at 2:00 AM UTC and can also be triggered manually for specific environments (dev, staging, prod, or all).
+
+**How it works:**
+1. Authenticates to Azure using the service principal credentials
+2. Fetches the storage account access key via `az storage account keys list` and exports it as `ARM_ACCESS_KEY`
+3. Runs `terraform init` and `terraform plan` with `-detailed-exitcode` to detect changes
+4. Reports drift status per environment in the workflow summary
+
+**Backend auth pattern** used across CI workflows:
+```yaml
+- name: Azure Login
+  uses: azure/login@v2
+  with:
+    creds: '{"clientId":"...","clientSecret":"...","subscriptionId":"...","tenantId":"..."}'
+
+- name: Get Storage Access Key
+  run: |
+    ACCESS_KEY=$(az storage account keys list \
+      --resource-group terraform-state-rg \
+      --account-name tfstateaksproject \
+      --query '[0].value' -o tsv)
+    echo "::add-mask::$ACCESS_KEY"
+    echo "ARM_ACCESS_KEY=$ACCESS_KEY" >> $GITHUB_ENV
+```
+
+This approach uses management-plane access (Contributor role) to retrieve the storage key, then uses the key for data-plane blob operations. This avoids needing `Storage Blob Data Contributor` RBAC on the storage account.
 
 ### 🔐 Required Secrets
 
