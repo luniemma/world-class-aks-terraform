@@ -4,6 +4,99 @@ Production-ready, modular Terraform configuration for Azure Kubernetes Service (
 
 ## 🏗️ Architecture
 
+### Infrastructure Flow
+
+```mermaid
+flowchart TB
+    subgraph INIT["1 · Terraform Init"]
+        BE[Azure Storage Backend<br/>terraform-state-rg / tfstateaksproject]
+    end
+
+    subgraph ROOT["2 · Root Module"]
+        RG["Resource Group<br/>{project}-{env}-rg"]
+        LAW["Log Analytics Workspace<br/>{project}-{env}-law<br/>30-day retention"]
+    end
+
+    subgraph NET["3 · Networking Module"]
+        VNET["Virtual Network<br/>{project}-{env}-vnet<br/>10.0.0.0/16"]
+        SUB["AKS Subnet<br/>{project}-{env}-aks-subnet<br/>10.0.1.0/24"]
+        NSG["Network Security Group<br/>Allow HTTPS · Deny All"]
+    end
+
+    subgraph AKS["4 · AKS Module"]
+        MI["User-Assigned<br/>Managed Identity"]
+        CLUSTER["AKS Cluster<br/>{project}-{env}-aks"]
+        DIAG["Diagnostic Settings<br/>API Server · Audit · Scheduler"]
+    end
+
+    subgraph SEC["Security & Add-ons"]
+        AAD["Azure AD / RBAC"]
+        DEF["Microsoft Defender"]
+        KV["Key Vault<br/>Secrets Provider"]
+        POL["Azure Policy"]
+        WI["Workload Identity<br/>OIDC Issuer"]
+    end
+
+    BE --> RG
+    RG --> LAW
+    RG --> VNET
+    VNET --> SUB
+    SUB --> NSG
+    SUB --> MI
+    MI --> CLUSTER
+    LAW --> DIAG
+    CLUSTER --> DIAG
+    CLUSTER --> AAD
+    CLUSTER --> DEF
+    CLUSTER --> KV
+    CLUSTER --> POL
+    CLUSTER --> WI
+
+    style INIT fill:#2d3748,color:#e2e8f0,stroke:#4a5568
+    style ROOT fill:#1a365d,color:#bee3f8,stroke:#2b6cb0
+    style NET  fill:#22543d,color:#c6f6d5,stroke:#2f855a
+    style AKS  fill:#553c9a,color:#e9d8fd,stroke:#6b46c1
+    style SEC  fill:#744210,color:#fefcbf,stroke:#b7791f
+```
+
+### CI/CD Pipeline Flow
+
+```mermaid
+flowchart LR
+    subgraph PR["Pull Request"]
+        LINT["fmt · validate<br/>tfsec · Checkov"]
+        PLAN["terraform plan"]
+        COST["Infracost<br/>Cost Estimate"]
+    end
+
+    subgraph DEV["Dev Deploy"]
+        D_INIT["terraform init"]
+        D_APPLY["terraform apply<br/>auto-approve"]
+        D_VAL["Post-deploy<br/>Validation"]
+    end
+
+    subgraph PROD["Prod Deploy"]
+        APPROVAL["Manual<br/>Approval Gate"]
+        P_INIT["terraform init"]
+        P_APPLY["terraform apply"]
+        P_VAL["Post-deploy<br/>Validation"]
+    end
+
+    DRIFT["Scheduled<br/>Drift Detection<br/>Daily 2 AM UTC"]
+
+    LINT --> PLAN --> COST
+    COST -->|merge to develop| D_INIT --> D_APPLY --> D_VAL
+    COST -->|merge to main| APPROVAL --> P_INIT --> P_APPLY --> P_VAL
+    DRIFT -.->|reports drift| PLAN
+
+    style PR   fill:#2d3748,color:#e2e8f0,stroke:#4a5568
+    style DEV  fill:#22543d,color:#c6f6d5,stroke:#2f855a
+    style PROD fill:#742a2a,color:#fed7d7,stroke:#c53030
+    style DRIFT fill:#744210,color:#fefcbf,stroke:#b7791f
+```
+
+### Directory Structure
+
 ```
 aks-terraform/
 ├── main.tf                      # Root module - orchestrates all resources
