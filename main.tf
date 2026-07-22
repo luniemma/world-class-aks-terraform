@@ -15,7 +15,7 @@ terraform {
   # Backend with workspace support - each environment gets its own state
   backend "azurerm" {
     resource_group_name  = "terraform-state-rg"
-    storage_account_name = "tfstateaksproject"
+    storage_account_name = "aksdemotfstate8766"
     container_name       = "tfstate"
     key                  = "aks/terraform.tfstate"
   }

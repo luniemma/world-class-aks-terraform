@@ -55,7 +55,7 @@ jobs:
         run: |
           ACCESS_KEY=$(az storage account keys list \
             --resource-group terraform-state-rg \
-            --account-name tfstateaksproject \
+            --account-name aksdemotfstate8766 \
             --query '[0].value' -o tsv)
           echo "::add-mask::$ACCESS_KEY"
           echo "ARM_ACCESS_KEY=$ACCESS_KEY" >> $GITHUB_ENV
@@ -129,7 +129,7 @@ jobs:
         run: |
           ACCESS_KEY=$(az storage account keys list \
             --resource-group terraform-state-rg \
-            --account-name tfstateaksproject \
+            --account-name aksdemotfstate8766 \
             --query '[0].value' -o tsv)
           echo "::add-mask::$ACCESS_KEY"
           echo "ARM_ACCESS_KEY=$ACCESS_KEY" >> $GITHUB_ENV
@@ -203,7 +203,7 @@ jobs:
         run: |
           ACCESS_KEY=$(az storage account keys list \
             --resource-group terraform-state-rg \
-            --account-name tfstateaksproject \
+            --account-name aksdemotfstate8766 \
             --query '[0].value' -o tsv)
           echo "::add-mask::$ACCESS_KEY"
           echo "ARM_ACCESS_KEY=$ACCESS_KEY" >> $GITHUB_ENV

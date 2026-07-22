@@ -9,7 +9,7 @@ Production-ready, modular Terraform configuration for Azure Kubernetes Service (
 ```mermaid
 flowchart TB
     subgraph INIT["1 · Terraform Init"]
-        BE[Azure Storage Backend<br/>terraform-state-rg / tfstateaksproject]
+        BE[Azure Storage Backend<br/>terraform-state-rg / aksdemotfstate8766]
     end
 
     subgraph ROOT["2 · Root Module"]
@@ -190,21 +190,21 @@ nano terraform.tfvars
 az group create --name terraform-state-rg --location eastus
 
 az storage account create \
-  --name tfstateaksproject \
+  --name aksdemotfstate8766 \
   --resource-group terraform-state-rg \
   --location eastus \
   --sku Standard_LRS
 
 az storage container create \
   --name tfstate \
-  --account-name tfstateaksproject
+  --account-name aksdemotfstate8766
 ```
 
 The backend is configured in `main.tf`:
 ```hcl
 backend "azurerm" {
   resource_group_name  = "terraform-state-rg"
-  storage_account_name = "tfstateaksproject"
+  storage_account_name = "aksdemotfstate8766"
   container_name       = "tfstate"
   key                  = "aks/terraform.tfstate"
 }
@@ -363,7 +363,7 @@ The drift detection workflow runs daily at 2:00 AM UTC and can also be triggered
   run: |
     ACCESS_KEY=$(az storage account keys list \
       --resource-group terraform-state-rg \
-      --account-name tfstateaksproject \
+      --account-name aksdemotfstate8766 \
       --query '[0].value' -o tsv)
     echo "::add-mask::$ACCESS_KEY"
     echo "ARM_ACCESS_KEY=$ACCESS_KEY" >> $GITHUB_ENV
