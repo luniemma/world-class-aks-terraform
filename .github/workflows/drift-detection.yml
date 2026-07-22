@@ -26,7 +26,7 @@ permissions:
   actions: write
   
 env:
-  TERRAFORM_VERSION: '1.6.0'
+  TERRAFORM_VERSION: '1.14.7'
   LOCK_TIME: '300s'
 
 jobs:

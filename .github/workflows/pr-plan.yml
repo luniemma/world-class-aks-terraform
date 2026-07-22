@@ -116,7 +116,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: dev
-      terraform_version: '1.6.0'
+      terraform_version: '1.14.7'
       var_file: 'environments/dev.tfvars'
       terraform_action: plan
       enable_checkov: true
@@ -137,7 +137,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: staging
-      terraform_version: '1.6.0'
+      terraform_version: '1.14.7'
       var_file: 'environments/staging.tfvars'
       terraform_action: plan
       enable_checkov: true
@@ -158,7 +158,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: prod
-      terraform_version: '1.6.0'
+      terraform_version: '1.14.7'
       var_file: 'environments/prod.tfvars'
       terraform_action: plan
       enable_checkov: true

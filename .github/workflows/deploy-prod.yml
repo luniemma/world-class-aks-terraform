@@ -90,7 +90,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: prod
-      terraform_version: '1.6.0'
+      terraform_version: '1.14.7'
       var_file: 'environments/prod.tfvars'
       terraform_action: plan
       enable_checkov: true
@@ -129,7 +129,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: prod
-      terraform_version: '1.6.0'
+      terraform_version: '1.14.7'
       var_file: 'environments/prod.tfvars'
       terraform_action: apply
       auto_approve: true
@@ -182,7 +182,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: prod
-      terraform_version: '1.6.0'
+      terraform_version: '1.14.7'
       var_file: 'environments/prod.tfvars'
       terraform_action: destroy
       auto_approve: true

@@ -11,7 +11,7 @@ on:
         description: 'Terraform version to use'
         required: false
         type: string
-        default: '1.6.0'
+        default: '1.14.7'
       working_directory:
         description: 'Working directory for Terraform'
         required: false

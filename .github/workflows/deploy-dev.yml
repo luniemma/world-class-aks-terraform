@@ -45,7 +45,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       environment: dev
-      terraform_version: '1.6.0'
+      terraform_version: '1.14.7'
       var_file: 'environments/dev.tfvars'
       terraform_action: ${{ inputs.terraform_action || 'plan' }}
       enable_checkov: true
